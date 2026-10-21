@@ -89,13 +89,24 @@ class _Brand extends StatelessWidget {
     return Row(
       children: [
         Container(
-          width: 26,
-          height: 26,
+          width: 28,
+          height: 28,
           decoration: const BoxDecoration(color: AppColors.accent, shape: BoxShape.circle),
-          child: const Icon(Icons.monitor_heart_outlined, size: 16, color: Colors.white),
+          child: const Icon(Icons.live_tv_rounded, size: 16, color: Colors.white),
         ),
         const SizedBox(width: 10),
-        const Text('Pulse Media', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: -0.2)),
+        const Text.rich(
+          TextSpan(
+            children: [
+              TextSpan(text: 'Ip'),
+              TextSpan(
+                text: 'Flix',
+                style: TextStyle(color: AppColors.accent),
+              ),
+            ],
+          ),
+          style: TextStyle(fontSize: 19, fontWeight: FontWeight.w900, letterSpacing: -0.4),
+        ),
       ],
     );
   }

@@ -68,4 +68,15 @@ void main() {
     expect(CategoryTitle.parse('UK - Sports').language?.code, 'en');
     expect(CategoryTitle.parse('VIP | Action').language, isNull);
   });
+
+  test('Kategorien mit Länderkürzel ohne Trennzeichen', () {
+    final a = CategoryTitle.parse('AL SPORTS');
+    expect(a.language?.code, 'sq');
+    expect(a.name, 'SPORTS');
+    expect(CategoryTitle.parse('AL').name, 'Shqip');
+    expect(CategoryTitle.parse('DE SPORT').language?.code, 'de');
+    expect(CategoryTitle.parse('TV Serien').language, isNull);
+    expect(CategoryTitle.parse('TV Serien').name, 'TV Serien');
+    expect(CategoryTitle.parse('HD Kanäle').language, isNull);
+  });
 }

@@ -161,10 +161,23 @@ class CategoryTitle {
     caseSensitive: false,
   );
 
+  static final _barePrefix = RegExp(r'^([A-Z]{2,3})(?:\s+|$)');
+
   static CategoryTitle parse(String raw, {int? currentYear}) {
     final parsed = ChannelName.parse(raw);
     var name = parsed.title;
-    final language = Language.fromCode(parsed.country);
+    var language = Language.fromCode(parsed.country);
+    // Kürzel ohne Trennzeichen: „AL SPORTS“, „DE SPORT“, „TR ULUSAL“. Nur bekannte
+    // Länderkürzel zählen, damit „TV Serien“ oder „HD Kanäle“ unangetastet bleiben.
+    if (language == null) {
+      final bare = _barePrefix.firstMatch(name);
+      final candidate = bare == null ? null : Language.fromCode(bare.group(1));
+      if (candidate != null) {
+        language = candidate;
+        final rest = name.substring(bare!.end).trim();
+        name = rest.isEmpty ? candidate.label : rest;
+      }
+    }
     // „Filme - 2026“ → „Neuerscheinungen 2026“ (bzw. „Filme 2019“ für ältere Jahre).
     final yearCategory = _yearOnly.firstMatch('$name${parsed.year != null ? ' ${parsed.year}' : ''}'.trim());
     if (yearCategory != null) {

@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.enesyazici" "\0"
-            VALUE "FileDescription", "Pulse Media" "\0"
+            VALUE "FileDescription", "IpFlix" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "PulseMedia" "\0"
+            VALUE "InternalName", "IpFlix" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 com.enesyazici. All rights reserved." "\0"
-            VALUE "OriginalFilename", "PulseMedia.exe" "\0"
-            VALUE "ProductName", "Pulse Media" "\0"
+            VALUE "OriginalFilename", "IpFlix.exe" "\0"
+            VALUE "ProductName", "IpFlix" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

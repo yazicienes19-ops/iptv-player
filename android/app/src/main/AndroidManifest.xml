@@ -9,7 +9,7 @@
 
     <!-- Viele IPTV-Anbieter streamen über unverschlüsseltes http. -->
     <application
-        android:label="Pulse Media"
+        android:label="IpFlix"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:banner="@drawable/tv_banner"

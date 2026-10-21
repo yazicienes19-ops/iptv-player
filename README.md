@@ -1,4 +1,4 @@
-# Pulse Media
+# IpFlix
 
 IPTV-Player für macOS und iOS mit Flutter, Riverpod und media_kit (libmpv).
 

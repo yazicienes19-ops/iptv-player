@@ -53,7 +53,7 @@ class IptvApp extends ConsumerWidget {
       WakelockPlus.toggle(enable: playing).ignore();
     });
     return MaterialApp(
-      title: 'Pulse Media',
+      title: 'IpFlix',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
       home: hasPlaylist ? const HomeShell() : const AddPlaylistScreen(isOnboarding: true),

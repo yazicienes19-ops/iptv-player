@@ -103,7 +103,7 @@ class PlayerController extends Notifier<PlaybackState> {
   @override
   PlaybackState build() {
     player = Player(
-      configuration: const PlayerConfiguration(title: 'Pulse Media', bufferSize: 64 * 1024 * 1024),
+      configuration: const PlayerConfiguration(title: 'IpFlix', bufferSize: 64 * 1024 * 1024),
     );
     videoController = VideoController(player);
 
