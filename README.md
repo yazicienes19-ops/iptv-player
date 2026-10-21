@@ -37,7 +37,7 @@ Voraussetzungen: Flutter 3.47+, Xcode, CocoaPods (`brew install cocoapods`).
 ## Tests
 
 ```sh
-flutter test                      # Unit-Tests (Parser, HLS-Auflöser, Namens-Bereinigung)
+flutter test                      # Unit-Tests (Parser, HLS-Auflöser, Namens-Bereinigung, Fernbedienung)
 
 # Ende-zu-Ende mit echten öffentlichen Streams (macOS):
 python3 integration_test/test_server.py &
