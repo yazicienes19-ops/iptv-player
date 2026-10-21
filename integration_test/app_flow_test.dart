@@ -2,6 +2,9 @@
 //
 // Erwartet eine M3U unter http://127.0.0.1:8765/test.m3u (siehe README).
 // Ausgaben mit `SHOT:` markieren Momente für externe Fensterfotos.
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -12,7 +15,9 @@ import 'package:iptv_player/models/content_type.dart';
 import 'package:iptv_player/models/playlist_credentials.dart';
 import 'package:iptv_player/player/player_controller.dart';
 import 'package:iptv_player/providers/app_providers.dart';
+import 'package:iptv_player/services/app_settings.dart';
 import 'package:iptv_player/services/local_store.dart';
+import 'package:iptv_player/services/secure_store.dart';
 import 'package:iptv_player/ui/home/home_shell.dart';
 import 'package:iptv_player/ui/widgets/channel_views.dart';
 import 'package:media_kit/media_kit.dart';
@@ -71,7 +76,9 @@ void main() {
     MediaKit.ensureInitialized();
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
-    final store = LocalStore(prefs);
+    final secure = SecureStore();
+    await secure.deleteAll();
+    final store = await LocalStore.open(prefs, secure);
     await store.savePlaylists([
       const PlaylistCredentials(id: 'demo', name: 'Demo (öffentliche Sender)', kind: PlaylistKind.m3uUrl, m3uUrl: playlistUrl),
     ]);
@@ -93,7 +100,10 @@ void main() {
       ),
       child: ProviderScope(
         retry: (_, _) => null,
-        overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
+        overrides: [
+          sharedPreferencesProvider.overrideWithValue(prefs),
+          localStoreProvider.overrideWithValue(store),
+        ],
         child: const IptvApp(),
       ),
     ));
@@ -201,8 +211,8 @@ void main() {
     await tester.tap(find.text('Abspielen').last);
     await awaitPlayback(tester, container, maxSeconds: 40);
     await shot(tester, '05_film_vollbild');
-    pop(tester);
-    await wait(tester, const Duration(seconds: 1));
+    await tester.state<NavigatorState>(find.byType(Navigator).first).maybePop();
+    await wait(tester, const Duration(seconds: 2));
     report('Vollbild schließen stoppt Film', 'Kanal danach: ${container.read(playerControllerProvider).channel?.name}');
     pop(tester);
 
@@ -220,6 +230,34 @@ void main() {
     await shot(tester, '07_favoriten');
 
     // --- Handy-Layout (iPhone-Größe) ---
+    // --- Datenschutz: Schlüsselbund, User-Agent, Kill-Switch ---
+    final secret = await secure.read('playlist.demo');
+    final prefsDump = prefs.getKeys().map((k) => '$k=${prefs.get(k)}').join('\n');
+    report('Schlüsselbund enthält Playlist', '${secret != null && secret.contains('test.m3u')}');
+    report('Prefs ohne M3U-URL/Passwort', '${!prefsDump.contains('127.0.0.1:8765/test.m3u')}');
+
+    final probe = byName(live, 'UA-Probe');
+    container.read(settingsProvider.notifier).update((s) => s.copyWith(userAgentPreset: UserAgentPreset.appleTv));
+    await controller.play(probe, queue: live);
+    await wait(tester, const Duration(seconds: 3));
+    await controller.stop();
+    final uaLog = (await HttpClient().getUrl(Uri.parse('http://127.0.0.1:8765/ua-log')).then((r) => r.close()))
+        .transform(utf8.decoder)
+        .join();
+    final seen = (jsonDecode(await uaLog) as List).cast<Map<String, dynamic>>();
+    String agentsFor(String path) => seen.where((e) => (e['path'] as String).startsWith(path)).map((e) => e['ua']).toSet().join(' | ');
+    report('User-Agent beim M3U-Abruf', agentsFor('/test.m3u'));
+    report('User-Agent von libmpv', agentsFor('/ua-probe'));
+
+    container.read(settingsProvider.notifier).update((s) => s.copyWith(killSwitch: true));
+    await wait(tester, const Duration(seconds: 4));
+    await controller.play(byName(live, 'tagesschau24'), queue: live);
+    await wait(tester, const Duration(seconds: 2));
+    report('Kill-Switch ohne VPN', container.read(playerControllerProvider).error ?? 'NICHT blockiert!');
+    await shot(tester, '12_killswitch');
+    container.read(settingsProvider.notifier).update((s) => s.copyWith(killSwitch: false, userAgentPreset: UserAgentPreset.vlc));
+    await controller.stop();
+
     container.read(searchQueryProvider(AppSection.live).notifier).set('');
     container.read(sectionProvider.notifier).select(AppSection.live);
     await controller.play(byName(live, 'tagesschau24'), queue: live);
@@ -234,8 +272,20 @@ void main() {
     await shot(tester, '10_handy_details');
     pop(tester);
     phone.value = false;
+    await wait(tester, const Duration(seconds: 1));
 
-    await controller.stop();
-    await prefs.clear();
+    // --- Panik-Knopf über die Oberfläche ---
+    await tester.tap(find.text('Einstellungen'));
+    await wait(tester, const Duration(seconds: 1));
+    await shot(tester, '13_einstellungen');
+    await tester.scrollUntilVisible(find.text('Alle lokalen Daten & Cache sofort löschen'), 300);
+    await tester.tap(find.text('Alle lokalen Daten & Cache sofort löschen'));
+    await wait(tester, const Duration(seconds: 1));
+    await tester.tap(find.text('Alles löschen'));
+    await wait(tester, const Duration(seconds: 3));
+    report('Nach Panik: Schlüsselbund leer', '${await secure.read('playlist.demo') == null}');
+    report('Nach Panik: Einstellungen leer', '${prefs.getKeys().isEmpty} (${prefs.getKeys().join(', ')})');
+    report('Nach Panik: Startbildschirm', '${find.text('Willkommen').evaluate().isNotEmpty}');
+    await shot(tester, '14_nach_panik');
   }, timeout: const Timeout(Duration(minutes: 10)));
 }

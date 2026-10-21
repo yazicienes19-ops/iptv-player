@@ -48,8 +48,7 @@ class LiveChannelsView extends ConsumerWidget {
         if (!compact && channels.hasValue)
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
-            child: Text('$channelCount Sender',
-                style: const TextStyle(color: AppColors.textSecondary, fontSize: 12.5)),
+            child: Text('$channelCount Sender', style: const TextStyle(color: AppColors.textSecondary, fontSize: 12.5)),
           ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
@@ -68,10 +67,7 @@ class LiveChannelsView extends ConsumerWidget {
             ],
           ),
         ),
-        if (compact) ...[
-          const CategoryChips(type: type),
-          const SizedBox(height: 8),
-        ],
+        if (compact) ...[const CategoryChips(type: type), const SizedBox(height: 8)],
         Expanded(
           child: channels.when(
             loading: () => const AsyncStateView.loading(),
@@ -111,9 +107,9 @@ class FavoritesView extends ConsumerWidget {
     final series = ofType(ContentType.series);
 
     Widget rowTitle(String text) => Padding(
-          padding: EdgeInsets.fromLTRB(hPad, 8, hPad, 8),
-          child: Text(text, style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
-        );
+      padding: EdgeInsets.fromLTRB(hPad, 8, hPad, 8),
+      child: Text(text, style: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+    );
 
     Widget posterRow(List<Channel> items) {
       final width = compact ? 112.0 : 150.0;

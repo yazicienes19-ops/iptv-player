@@ -41,30 +41,30 @@ class PlaylistCredentials {
   }
 
   String get subtitle => switch (kind) {
-        PlaylistKind.xtream => '$username @ ${Uri.tryParse(normalizedServer)?.host ?? serverUrl}',
-        PlaylistKind.m3uUrl => m3uUrl ?? '',
-        PlaylistKind.m3uFile => 'Lokale Datei',
-      };
+    PlaylistKind.xtream => '$username @ ${Uri.tryParse(normalizedServer)?.host ?? serverUrl}',
+    PlaylistKind.m3uUrl => m3uUrl ?? '',
+    PlaylistKind.m3uFile => 'Lokale Datei',
+  };
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'kind': kind.name,
-        'serverUrl': serverUrl,
-        'username': username,
-        'password': password,
-        'm3uUrl': m3uUrl,
-        'localFilePath': localFilePath,
-      };
+    'id': id,
+    'name': name,
+    'kind': kind.name,
+    'serverUrl': serverUrl,
+    'username': username,
+    'password': password,
+    'm3uUrl': m3uUrl,
+    'localFilePath': localFilePath,
+  };
 
   factory PlaylistCredentials.fromJson(Map<String, dynamic> json) => PlaylistCredentials(
-        id: json['id'] as String,
-        name: json['name'] as String,
-        kind: PlaylistKind.values.byName(json['kind'] as String),
-        serverUrl: json['serverUrl'] as String?,
-        username: json['username'] as String?,
-        password: json['password'] as String?,
-        m3uUrl: json['m3uUrl'] as String?,
-        localFilePath: json['localFilePath'] as String?,
-      );
+    id: json['id'] as String,
+    name: json['name'] as String,
+    kind: PlaylistKind.values.byName(json['kind'] as String),
+    serverUrl: json['serverUrl'] as String?,
+    username: json['username'] as String?,
+    password: json['password'] as String?,
+    m3uUrl: json['m3uUrl'] as String?,
+    localFilePath: json['localFilePath'] as String?,
+  );
 }

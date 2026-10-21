@@ -6,10 +6,12 @@ import '../../player/player_controller.dart';
 import '../../player/player_view.dart';
 import '../../providers/app_providers.dart';
 import '../playlists/playlist_sheet.dart';
+import '../settings/settings_page.dart';
 import '../theme.dart';
 import '../widgets/category_views.dart';
 import '../browse/browse_view.dart';
 import '../widgets/now_playing_panel.dart';
+import '../widgets/vpn_badge.dart';
 import '../widgets/section_content.dart';
 import 'home_shell.dart';
 
@@ -28,12 +30,16 @@ class WideLayout extends ConsumerWidget {
             const VerticalDivider(width: 1),
             ...switch (section) {
               AppSection.live => [
-                  const SizedBox(width: 380, child: LiveChannelsView()),
-                  const VerticalDivider(width: 1),
-                  const Expanded(child: _PlayerPane()),
-                ],
+                const SizedBox(width: 380, child: LiveChannelsView()),
+                const VerticalDivider(width: 1),
+                const Expanded(child: _PlayerPane()),
+              ],
               AppSection.favorites => [const Expanded(child: FavoritesView())],
-              _ => [Expanded(child: BrowseView(key: ValueKey(section), type: section.contentType!))],
+              _ => [
+                Expanded(
+                  child: BrowseView(key: ValueKey(section), type: section.contentType!),
+                ),
+              ],
             },
           ],
         ),
@@ -55,8 +61,9 @@ class _NavigationPane extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        const Padding(padding: EdgeInsets.fromLTRB(8, 12, 8, 0), child: VpnBadge()),
         Padding(
-          padding: const EdgeInsets.fromLTRB(8, 12, 8, 8),
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
           child: ListTile(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             tileColor: AppColors.surfaceHigh,
@@ -73,17 +80,32 @@ class _NavigationPane extends ConsumerWidget {
               dense: true,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               selected: s == section,
-              leading: Icon(s == section ? sectionIcons[s]!.$2 : sectionIcons[s]!.$1,
-                  color: s == section ? AppColors.accent : null),
+              leading: Icon(
+                s == section ? sectionIcons[s]!.$2 : sectionIcons[s]!.$1,
+                color: s == section ? AppColors.accent : null,
+              ),
               title: Text(s.label, style: const TextStyle(fontSize: 14)),
               onTap: () => ref.read(sectionProvider.notifier).select(s),
             ),
           ),
         const Divider(height: 24),
         if (type != null) ...[
-          Expanded(child: CategoryList(key: ValueKey(type), type: type)),
+          Expanded(
+            child: CategoryList(key: ValueKey(type), type: type),
+          ),
         ] else
           const Spacer(),
+        const Divider(height: 1),
+        Padding(
+          padding: const EdgeInsets.all(8),
+          child: ListTile(
+            dense: true,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            leading: const Icon(Icons.settings_rounded),
+            title: const Text('Einstellungen', style: TextStyle(fontSize: 14)),
+            onTap: () => Navigator.of(context).push(SettingsPage.route()),
+          ),
+        ),
       ],
     );
   }
@@ -102,13 +124,13 @@ class _PlayerPane extends ConsumerWidget {
         AspectRatio(
           aspectRatio: 16 / 9,
           child: PlayerView(
-            onToggleFullscreen: channel == null
-                ? null
-                : () => Navigator.of(context).push(FullscreenPlayerPage.route()),
+            onToggleFullscreen: channel == null ? null : () => Navigator.of(context).push(FullscreenPlayerPage.route()),
           ),
         ),
         if (channel != null)
-          Expanded(child: NowPlayingPanel(key: ValueKey(channel.id), channel: channel))
+          Expanded(
+            child: NowPlayingPanel(key: ValueKey(channel.id), channel: channel),
+          )
         else
           const Expanded(
             child: Center(

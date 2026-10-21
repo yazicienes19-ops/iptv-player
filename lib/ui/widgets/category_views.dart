@@ -63,11 +63,7 @@ class _CategoryListState extends ConsumerState<CategoryList> {
                 prefixIconConstraints: const BoxConstraints(minWidth: 34),
                 suffixIcon: _filter.text.isEmpty
                     ? null
-                    : IconButton(
-                        iconSize: 16,
-                        icon: const Icon(Icons.close),
-                        onPressed: () => setState(_filter.clear),
-                      ),
+                    : IconButton(iconSize: 16, icon: const Icon(Icons.close), onPressed: () => setState(_filter.clear)),
               ),
             ),
           ),
@@ -144,8 +140,8 @@ class _CategoryItemState extends State<_CategoryItem> {
             color: selected
                 ? AppColors.accent.withValues(alpha: 0.16)
                 : _hovered
-                    ? AppColors.surface
-                    : Colors.transparent,
+                ? AppColors.surface
+                : Colors.transparent,
             borderRadius: BorderRadius.circular(20),
             border: Border.all(color: selected ? AppColors.accent.withValues(alpha: 0.5) : Colors.transparent),
           ),
@@ -171,10 +167,7 @@ class _CategoryItemState extends State<_CategoryItem> {
                     color: selected ? AppColors.accent : AppColors.surfaceHigh,
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Text(
-                    '${widget.count}',
-                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
-                  ),
+                  child: Text('${widget.count}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
                 )
               else
                 Text(

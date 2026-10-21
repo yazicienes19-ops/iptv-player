@@ -12,7 +12,7 @@ class MainFlutterWindow: NSWindow {
     let origin = NSPoint(x: screen.midX - size.width / 2, y: screen.midY - size.height / 2)
     self.setFrame(NSRect(origin: origin, size: size), display: true)
     self.minSize = NSSize(width: 380, height: 560)
-    self.title = "IPTV Player"
+    self.title = "Pulse Media"
 
     RegisterGeneratedPlugins(registry: flutterViewController)
 

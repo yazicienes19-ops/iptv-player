@@ -32,26 +32,26 @@ class Channel {
   bool get isPlayable => streamUrl.isNotEmpty;
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'streamUrl': streamUrl,
-        'type': type.name,
-        'logo': logo,
-        'categoryId': categoryId,
-        'epgChannelId': epgChannelId,
-        'xtreamStreamId': xtreamStreamId,
-      };
+    'id': id,
+    'name': name,
+    'streamUrl': streamUrl,
+    'type': type.name,
+    'logo': logo,
+    'categoryId': categoryId,
+    'epgChannelId': epgChannelId,
+    'xtreamStreamId': xtreamStreamId,
+  };
 
   factory Channel.fromJson(Map<String, dynamic> json) => Channel(
-        id: json['id'] as String,
-        name: json['name'] as String,
-        streamUrl: json['streamUrl'] as String,
-        type: ContentType.fromName(json['type'] as String?),
-        logo: json['logo'] as String?,
-        categoryId: json['categoryId'] as String?,
-        epgChannelId: json['epgChannelId'] as String?,
-        xtreamStreamId: json['xtreamStreamId'] as int?,
-      );
+    id: json['id'] as String,
+    name: json['name'] as String,
+    streamUrl: json['streamUrl'] as String,
+    type: ContentType.fromName(json['type'] as String?),
+    logo: json['logo'] as String?,
+    categoryId: json['categoryId'] as String?,
+    epgChannelId: json['epgChannelId'] as String?,
+    xtreamStreamId: json['xtreamStreamId'] as int?,
+  );
 
   @override
   bool operator ==(Object other) => other is Channel && other.id == id && other.type == type;

@@ -1,4 +1,4 @@
-# IPTV Player
+# Pulse Media
 
 IPTV-Player für macOS und iOS mit Flutter, Riverpod und media_kit (libmpv).
 
@@ -13,6 +13,17 @@ IPTV-Player für macOS und iOS mit Flutter, Riverpod und media_kit (libmpv).
 - **Filme und Serien** im Netflix-Stil: Titelbild, Kategorie-Reihen, Detailseite, Staffeln und Folgen
 - Kurz-EPG, Stream-Info (Auflösung, FPS, Codecs, Bitrate) und Tonspurwahl
 - Automatische Wiederholung bei Offline-Streams, Vollbild, Spulen, Favoriten
+
+## Datenschutz
+
+- Zugangsdaten (Server, Benutzer, Passwort, M3U-URL) verschlüsselt im Schlüsselbund (`flutter_secure_storage`); in Favoriten werden Zugangsdaten in Stream-URLs durch Platzhalter ersetzt
+- VPN-Wächter mit Kill-Switch: ohne erkannten Tunnel keine Playlist-, Stream- oder Bildabrufe
+- Wählbarer User-Agent für alle HTTP-Anfragen und libmpv, keine Telemetrie, kein Festplatten-Cache, keine Logs in Release-Builds
+- Panik-Knopf löscht Playlists, Schlüsselbund, Einstellungen und Caches
+
+macOS: Signierung mit Apple-Development-Zertifikat (Team in `macos/Runner/Configs/AppInfo.xcconfig`).
+Ohne Provisioning-Profil nutzt die App den klassischen Schlüsselbund; mit `keychain-access-groups`
+automatisch die Data-Protection-Keychain.
 
 ## Starten
 
@@ -29,7 +40,7 @@ Voraussetzungen: Flutter 3.47+, Xcode, CocoaPods (`brew install cocoapods`).
 flutter test                      # Unit-Tests (Parser, HLS-Auflöser, Namens-Bereinigung)
 
 # Ende-zu-Ende mit echten öffentlichen Streams (macOS):
-cd integration_test && python3 -m http.server 8765 --bind 127.0.0.1 &
+python3 integration_test/test_server.py &
 flutter test integration_test/app_flow_test.dart -d macos
 ```
 

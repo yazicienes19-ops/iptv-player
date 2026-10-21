@@ -41,10 +41,7 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
   }
 
   Future<void> _pickFile() async {
-    final files = await FilePicker.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['m3u', 'm3u8', 'txt'],
-    );
+    final files = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['m3u', 'm3u8', 'txt']);
     final file = files.singleOrNull;
     if (file?.path == null) return;
     setState(() {
@@ -86,7 +83,7 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
             username: _username.text.trim(),
             password: _password.text,
           );
-          await XtreamApi(playlist).authenticate();
+          await XtreamApi(playlist, dio: ref.read(httpClientProvider)).authenticate();
         case PlaylistKind.m3uUrl:
           playlist = PlaylistCredentials(id: id, name: name, kind: _kind, m3uUrl: _m3uUrl.text.trim());
         case PlaylistKind.m3uFile:
@@ -133,7 +130,11 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
                     ],
                     SegmentedButton<PlaylistKind>(
                       segments: const [
-                        ButtonSegment(value: PlaylistKind.xtream, label: Text('Xtream'), icon: Icon(Icons.dns_outlined)),
+                        ButtonSegment(
+                          value: PlaylistKind.xtream,
+                          label: Text('Xtream'),
+                          icon: Icon(Icons.dns_outlined),
+                        ),
                         ButtonSegment(value: PlaylistKind.m3uUrl, label: Text('M3U URL'), icon: Icon(Icons.link)),
                         ButtonSegment(value: PlaylistKind.m3uFile, label: Text('Datei'), icon: Icon(Icons.folder_open)),
                       ],
@@ -174,49 +175,49 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
 
     return switch (_kind) {
       PlaylistKind.xtream => [
-          TextFormField(
-            controller: _server,
-            keyboardType: TextInputType.url,
-            autocorrect: false,
-            decoration: const InputDecoration(labelText: 'Server-URL', hintText: 'http://example.com:8080'),
-            validator: required,
-          ),
-          const SizedBox(height: 12),
-          TextFormField(
-            controller: _username,
-            autocorrect: false,
-            decoration: const InputDecoration(labelText: 'Benutzername'),
-            validator: required,
-          ),
-          const SizedBox(height: 12),
-          TextFormField(
-            controller: _password,
-            obscureText: true,
-            decoration: const InputDecoration(labelText: 'Passwort'),
-            validator: required,
-            onFieldSubmitted: (_) => _submit(),
-          ),
-        ],
+        TextFormField(
+          controller: _server,
+          keyboardType: TextInputType.url,
+          autocorrect: false,
+          decoration: const InputDecoration(labelText: 'Server-URL', hintText: 'http://example.com:8080'),
+          validator: required,
+        ),
+        const SizedBox(height: 12),
+        TextFormField(
+          controller: _username,
+          autocorrect: false,
+          decoration: const InputDecoration(labelText: 'Benutzername'),
+          validator: required,
+        ),
+        const SizedBox(height: 12),
+        TextFormField(
+          controller: _password,
+          obscureText: true,
+          decoration: const InputDecoration(labelText: 'Passwort'),
+          validator: required,
+          onFieldSubmitted: (_) => _submit(),
+        ),
+      ],
       PlaylistKind.m3uUrl => [
-          TextFormField(
-            controller: _m3uUrl,
-            keyboardType: TextInputType.url,
-            autocorrect: false,
-            decoration: const InputDecoration(labelText: 'M3U-URL', hintText: 'http://…/playlist.m3u'),
-            validator: (v) {
-              final uri = Uri.tryParse(v?.trim() ?? '');
-              return uri == null || !uri.hasScheme || uri.host.isEmpty ? 'Gültige URL eingeben' : null;
-            },
-          ),
-        ],
+        TextFormField(
+          controller: _m3uUrl,
+          keyboardType: TextInputType.url,
+          autocorrect: false,
+          decoration: const InputDecoration(labelText: 'M3U-URL', hintText: 'http://…/playlist.m3u'),
+          validator: (v) {
+            final uri = Uri.tryParse(v?.trim() ?? '');
+            return uri == null || !uri.hasScheme || uri.host.isEmpty ? 'Gültige URL eingeben' : null;
+          },
+        ),
+      ],
       PlaylistKind.m3uFile => [
-          OutlinedButton.icon(
-            onPressed: _busy ? null : _pickFile,
-            icon: const Icon(Icons.upload_file),
-            label: Text(_pickedFileName ?? 'M3U-Datei auswählen'),
-            style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-          ),
-        ],
+        OutlinedButton.icon(
+          onPressed: _busy ? null : _pickFile,
+          icon: const Icon(Icons.upload_file),
+          label: Text(_pickedFileName ?? 'M3U-Datei auswählen'),
+          style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+        ),
+      ],
     };
   }
 }

@@ -27,62 +27,68 @@ class NowPlayingPanel extends ConsumerWidget {
     final player = ref.read(playerControllerProvider.notifier).player;
     final textTheme = Theme.of(context).textTheme;
 
-    return LayoutBuilder(builder: (context, constraints) {
-      final twoColumns = constraints.maxWidth >= 760;
-      final epg = _EpgCard(channel: channel);
-      final info = _StreamInfoCard(player: player, playback: playback);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final twoColumns = constraints.maxWidth >= 760;
+        final epg = _EpgCard(channel: channel);
+        final info = _StreamInfoCard(player: player, playback: playback);
 
-      return ListView(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-        children: [
-          Row(
-            children: [
-              LogoTile(channel: channel, size: 52),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+        return ListView(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+          children: [
+            Row(
+              children: [
+                LogoTile(channel: channel, size: 52),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        name.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+                      ),
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          _LiveBadge(playback: playback),
+                          if (name.country != null) CountryTag(code: name.country!),
+                          for (final q in name.qualities) QualityBadge(tag: q),
+                          for (final note in name.notes)
+                            Text(note, style: const TextStyle(fontSize: 11.5, color: AppColors.textSecondary)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            if (twoColumns)
+              IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text(
-                      name.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-                    ),
-                    const SizedBox(height: 6),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 4,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        _LiveBadge(playback: playback),
-                        if (name.country != null) CountryTag(code: name.country!),
-                        for (final q in name.qualities) QualityBadge(tag: q),
-                        for (final note in name.notes)
-                          Text(note, style: const TextStyle(fontSize: 11.5, color: AppColors.textSecondary)),
-                      ],
-                    ),
+                    Expanded(flex: 5, child: epg),
+                    const SizedBox(width: 14),
+                    Expanded(flex: 4, child: info),
                   ],
                 ),
-              ),
+              )
+            else ...[
+              epg,
+              const SizedBox(height: 14),
+              info,
             ],
-          ),
-          const SizedBox(height: 18),
-          if (twoColumns)
-            IntrinsicHeight(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [Expanded(flex: 5, child: epg), const SizedBox(width: 14), Expanded(flex: 4, child: info)],
-              ),
-            )
-          else ...[
-            epg,
-            const SizedBox(height: 14),
-            info,
           ],
-        ],
-      );
-    });
+        );
+      },
+    );
   }
 }
 
@@ -96,13 +102,15 @@ class _LiveBadge extends StatelessWidget {
     final (label, color) = playback.hasError
         ? ('OFFLINE', AppColors.textSecondary)
         : playback.isLoading
-            ? ('VERBINDE …', const Color(0xFFFFB020))
-            : ('LIVE', AppColors.live);
+        ? ('VERBINDE …', const Color(0xFFFFB020))
+        : ('LIVE', AppColors.live);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(4)),
-      child: Text(label,
-          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 0.5, color: Colors.white)),
+      child: Text(
+        label,
+        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 0.5, color: Colors.white),
+      ),
     );
   }
 }
@@ -227,7 +235,10 @@ class _CurrentShow extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('JETZT', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: AppColors.accent)),
+        const Text(
+          'JETZT',
+          style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: AppColors.accent),
+        ),
         const SizedBox(height: 4),
         Text(item.title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
         const SizedBox(height: 10),
@@ -243,7 +254,10 @@ class _CurrentShow extends StatelessWidget {
         const SizedBox(height: 6),
         Row(
           children: [
-            Text('${_time(item.start)} – ${_time(item.end)}', style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+            Text(
+              '${_time(item.start)} – ${_time(item.end)}',
+              style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+            ),
             const Spacer(),
             Text('noch $remaining Min.', style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
           ],
@@ -275,10 +289,15 @@ class _NextShow extends StatelessWidget {
         children: [
           SizedBox(
             width: 50,
-            child: Text(_time(item.start),
-                style: const TextStyle(color: AppColors.textSecondary, fontFeatures: [FontFeature.tabularFigures()])),
+            child: Text(
+              _time(item.start),
+              style: const TextStyle(color: AppColors.textSecondary, fontFeatures: [FontFeature.tabularFigures()]),
+            ),
           ),
-          const Text('DANACH  ', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+          const Text(
+            'DANACH  ',
+            style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.textSecondary),
+          ),
           Expanded(child: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis)),
         ],
       ),
@@ -298,7 +317,9 @@ class _Hint extends StatelessWidget {
       children: [
         Icon(icon, size: 20, color: AppColors.textSecondary),
         const SizedBox(width: 10),
-        Expanded(child: Text(text, style: const TextStyle(color: AppColors.textSecondary, fontSize: 13))),
+        Expanded(
+          child: Text(text, style: const TextStyle(color: AppColors.textSecondary, fontSize: 13)),
+        ),
       ],
     );
   }
@@ -402,14 +423,19 @@ class _StreamInfoCardState extends State<_StreamInfoCard> {
                     child: Text(label, style: const TextStyle(fontSize: 12.5, color: AppColors.textSecondary)),
                   ),
                   Expanded(
-                    child: Text(value,
-                        style: const TextStyle(fontSize: 12.5, fontFeatures: [FontFeature.tabularFigures()])),
+                    child: Text(
+                      value,
+                      style: const TextStyle(fontSize: 12.5, fontFeatures: [FontFeature.tabularFigures()]),
+                    ),
                   ),
                 ],
               ),
             ),
           const SizedBox(height: 14),
-          const Text('TONSPUR', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: AppColors.textSecondary)),
+          const Text(
+            'TONSPUR',
+            style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: AppColors.textSecondary),
+          ),
           const SizedBox(height: 8),
           _AudioTrackSelector(player: widget.player),
         ],
@@ -418,11 +444,11 @@ class _StreamInfoCardState extends State<_StreamInfoCard> {
   }
 
   static String _qualityLabel(int height) => switch (height) {
-        >= 2000 => '4K',
-        >= 1000 => 'Full HD',
-        >= 700 => 'HD',
-        _ => 'SD',
-      };
+    >= 2000 => '4K',
+    >= 1000 => 'Full HD',
+    >= 700 => 'HD',
+    _ => 'SD',
+  };
 
   static String _formatFps(double fps) {
     final rounded = fps.roundToDouble();
@@ -432,29 +458,31 @@ class _StreamInfoCardState extends State<_StreamInfoCard> {
   static String? _formatBitrate(double? video, double? audio) {
     final total = (video ?? 0) + (audio ?? 0);
     if (total <= 0) return null;
-    return total >= 1e6 ? '${(total / 1e6).toStringAsFixed(1).replaceAll('.', ',')} Mbit/s' : '${(total / 1e3).round()} kbit/s';
+    return total >= 1e6
+        ? '${(total / 1e6).toStringAsFixed(1).replaceAll('.', ',')} Mbit/s'
+        : '${(total / 1e3).round()} kbit/s';
   }
 
   static String? _videoCodec(String? format) => switch (format) {
-        null || '' => null,
-        'h264' => 'H.264 / AVC',
-        'hevc' => 'H.265 / HEVC',
-        'av1' => 'AV1',
-        'vp9' => 'VP9',
-        'mpeg2video' => 'MPEG-2',
-        _ => format.toUpperCase(),
-      };
+    null || '' => null,
+    'h264' => 'H.264 / AVC',
+    'hevc' => 'H.265 / HEVC',
+    'av1' => 'AV1',
+    'vp9' => 'VP9',
+    'mpeg2video' => 'MPEG-2',
+    _ => format.toUpperCase(),
+  };
 
   static String? _audioCodec(String? codec) => switch (codec) {
-        null || '' => null,
-        'aac' => 'AAC',
-        'ac3' => 'Dolby Digital (AC-3)',
-        'eac3' => 'Dolby Digital Plus',
-        'mp2' => 'MPEG Audio (MP2)',
-        'mp3' => 'MP3',
-        'opus' => 'Opus',
-        _ => codec.toUpperCase(),
-      };
+    null || '' => null,
+    'aac' => 'AAC',
+    'ac3' => 'Dolby Digital (AC-3)',
+    'eac3' => 'Dolby Digital Plus',
+    'mp2' => 'MPEG Audio (MP2)',
+    'mp3' => 'MP3',
+    'opus' => 'Opus',
+    _ => codec.toUpperCase(),
+  };
 }
 
 class _AudioTrackSelector extends StatelessWidget {
@@ -484,7 +512,10 @@ class _AudioTrackSelector extends StatelessWidget {
             children: [
               for (final (i, t) in tracks.indexed)
                 ChoiceChip(
-                  label: Text(t.title ?? t.language?.toUpperCase() ?? 'Spur ${i + 1}', style: const TextStyle(fontSize: 12)),
+                  label: Text(
+                    t.title ?? t.language?.toUpperCase() ?? 'Spur ${i + 1}',
+                    style: const TextStyle(fontSize: 12),
+                  ),
                   visualDensity: VisualDensity.compact,
                   showCheckmark: false,
                   // „auto“ bedeutet: libmpv hat die erste Spur gewählt.

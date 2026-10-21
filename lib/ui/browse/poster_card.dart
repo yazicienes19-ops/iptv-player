@@ -72,8 +72,12 @@ class _PosterCardState extends ConsumerState<PosterCard> {
                             const Positioned(
                               top: 6,
                               right: 6,
-                              child: Icon(Icons.star_rounded, color: Colors.amber, size: 18,
-                                  shadows: [Shadow(blurRadius: 6)]),
+                              child: Icon(
+                                Icons.star_rounded,
+                                color: Colors.amber,
+                                size: 18,
+                                shadows: [Shadow(blurRadius: 6)],
+                              ),
                             ),
                           if (_hovered)
                             const DecoratedBox(
@@ -100,10 +104,7 @@ class _PosterCardState extends ConsumerState<PosterCard> {
                 channel.name,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 12.5,
-                  color: _hovered ? AppColors.textPrimary : AppColors.textSecondary,
-                ),
+                style: TextStyle(fontSize: 12.5, color: _hovered ? AppColors.textPrimary : AppColors.textSecondary),
               ),
             ],
           ),

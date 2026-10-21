@@ -1,4 +1,6 @@
 #EXTM3U
+#EXTINF:-1 group-title="Test | Fehlerfall",UA-Probe (Test)
+http://127.0.0.1:8765/ua-probe.ts
 #EXTINF:-1 group-title="DE | Formatierung",DE | ----- VOLLPROGRAMM -----
 http://separator.invalid/1
 #EXTINF:-1 tvg-logo="https://upload.wikimedia.org/wikipedia/commons/thumb/d/d1/ARD_Dachmarke_2014.svg/960px-ARD_Dachmarke_2014.svg.png" group-title="DE | Formatierung",DE | DAS ERSTE FHD

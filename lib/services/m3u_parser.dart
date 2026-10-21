@@ -61,16 +61,18 @@ class M3uParser {
         final name = (title?.isNotEmpty == true ? title : attributes['tvg-name']) ?? url;
         final logo = attributes['tvg-logo'];
 
-        channels[type]!.add(Channel(
-          // Gleiche URLs kommen in manchen Listen mehrfach vor; der Index hält die ID eindeutig.
-          id: '${channels[type]!.length}|$url',
-          name: name,
-          streamUrl: url,
-          type: type,
-          logo: logo?.isNotEmpty == true ? logo : null,
-          categoryId: category.id,
-          epgChannelId: attributes['tvg-id'],
-        ));
+        channels[type]!.add(
+          Channel(
+            // Gleiche URLs kommen in manchen Listen mehrfach vor; der Index hält die ID eindeutig.
+            id: '${channels[type]!.length}|$url',
+            name: name,
+            streamUrl: url,
+            type: type,
+            logo: logo?.isNotEmpty == true ? logo : null,
+            categoryId: category.id,
+            epgChannelId: attributes['tvg-id'],
+          ),
+        );
         attributes = null;
         title = null;
       }
@@ -108,5 +110,4 @@ class M3uParser {
     if (!isOnDemand) return ContentType.live;
     return group.contains('serie') ? ContentType.series : ContentType.movie;
   }
-
 }

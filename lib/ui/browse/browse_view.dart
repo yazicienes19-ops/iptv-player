@@ -49,7 +49,9 @@ class BrowseView extends ConsumerWidget {
       return _FilteredGrid(type: type, header: header, category: category, horizontalPadding: hPad);
     }
 
-    return ref.watch(channelsByCategoryProvider(type)).when(
+    return ref
+        .watch(channelsByCategoryProvider(type))
+        .when(
           loading: () => const AsyncStateView.loading(),
           error: (e, _) => AsyncStateView.error(error: e, onRetry: () => _reload(ref)),
           data: (rows) {
@@ -89,9 +91,7 @@ class BrowseView extends ConsumerWidget {
 
   /// Wechselt täglich, bleibt innerhalb eines Tages aber stabil.
   static Channel? _pickFeatured(List<(Category, List<Channel>)> rows) {
-    final candidates = [
-      for (final row in rows.take(6)) ...row.$2.take(10).where((c) => c.logo != null),
-    ];
+    final candidates = [for (final row in rows.take(6)) ...row.$2.take(10).where((c) => c.logo != null)];
     if (candidates.isEmpty) return rows.first.$2.first;
     final day = DateTime.now().difference(DateTime(2024)).inDays;
     return candidates[day % candidates.length];
@@ -183,8 +183,11 @@ class HeroBanner extends ConsumerWidget {
                           channel.name,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          style: (compact ? textTheme.headlineSmall : textTheme.displaySmall)
-                              ?.copyWith(fontWeight: FontWeight.w800, height: 1.05, letterSpacing: -0.5),
+                          style: (compact ? textTheme.headlineSmall : textTheme.displaySmall)?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            height: 1.05,
+                            letterSpacing: -0.5,
+                          ),
                         ),
                         if (meta.isNotEmpty) ...[
                           const SizedBox(height: 10),

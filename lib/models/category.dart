@@ -8,10 +8,10 @@ class Category {
   final ContentType type;
 
   factory Category.fromXtream(Map<String, dynamic> json, ContentType type) => Category(
-        id: '${json['category_id']}',
-        name: (json['category_name'] as String?)?.trim() ?? 'Ohne Namen',
-        type: type,
-      );
+    id: '${json['category_id']}',
+    name: (json['category_name'] as String?)?.trim() ?? 'Ohne Namen',
+    type: type,
+  );
 
   @override
   bool operator ==(Object other) => other is Category && other.id == id && other.type == type;

@@ -68,34 +68,40 @@ class ChannelList extends StatelessWidget {
       offset += section.channels.length;
       final list = SliverFixedExtentList(
         itemExtent: ChannelTile.height,
-        delegate: SliverChildBuilderDelegate(
-          (context, i) {
-            final channel = section.channels[i];
-            return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: ChannelTile(
-                channel: channel,
-                queue: queue,
-                number: start + i + 1,
-                category: categoryNames[channel.categoryId],
-              ),
-            );
-          },
-          childCount: section.channels.length,
-        ),
+        delegate: SliverChildBuilderDelegate((context, i) {
+          final channel = section.channels[i];
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: ChannelTile(
+              channel: channel,
+              queue: queue,
+              number: start + i + 1,
+              category: categoryNames[channel.categoryId],
+            ),
+          );
+        }, childCount: section.channels.length),
       );
       // PinnedHeaderSliver haftet nur innerhalb seiner Gruppe; der nächste
       // Abschnitt schiebt die Überschrift sauber hinaus.
-      slivers.add(section.header == null
-          ? list
-          : SliverMainAxisGroup(slivers: [
-              PinnedHeaderSliver(child: _SectionHeader(name: section.header!, count: section.channels.length)),
-              list,
-            ]));
+      slivers.add(
+        section.header == null
+            ? list
+            : SliverMainAxisGroup(
+                slivers: [
+                  PinnedHeaderSliver(
+                    child: _SectionHeader(name: section.header!, count: section.channels.length),
+                  ),
+                  list,
+                ],
+              ),
+      );
     }
 
     return CustomScrollView(
-      slivers: [...slivers, SliverToBoxAdapter(child: SizedBox(height: bottomPadding))],
+      slivers: [
+        ...slivers,
+        SliverToBoxAdapter(child: SizedBox(height: bottomPadding)),
+      ],
     );
   }
 }
@@ -120,10 +126,7 @@ class _SectionHeader extends StatelessWidget {
             decoration: BoxDecoration(color: AppColors.accent, borderRadius: BorderRadius.circular(2)),
           ),
           const SizedBox(width: 10),
-          if (name.country != null) ...[
-            CountryTag(code: name.country!),
-            const SizedBox(width: 8),
-          ],
+          if (name.country != null) ...[CountryTag(code: name.country!), const SizedBox(width: 8)],
           Expanded(
             child: Text(
               name.title,
@@ -226,10 +229,15 @@ class _ChannelTileState extends ConsumerState<ChannelTile> {
                 ),
                 LogoTile(channel: channel, size: logoSize),
                 const SizedBox(width: 14),
-                Expanded(child: _TitleBlock(name: name, playback: playback, category: widget.category, dense: widget.dense)),
+                Expanded(
+                  child: _TitleBlock(name: name, playback: playback, category: widget.category, dense: widget.dense),
+                ),
                 if (!widget.dense)
                   for (final q in name.qualities.take(3))
-                    Padding(padding: const EdgeInsets.only(left: 4), child: QualityBadge(tag: q)),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4),
+                      child: QualityBadge(tag: q),
+                    ),
                 if (!widget.dense)
                   AnimatedOpacity(
                     opacity: isFavorite || _hovered ? 1 : 0,
@@ -286,8 +294,8 @@ class _TitleBlock extends StatelessWidget {
                   playback!.hasError
                       ? 'Nicht verfügbar'
                       : playback!.isLoading
-                          ? 'Wird geladen …'
-                          : 'LIVE',
+                      ? 'Wird geladen …'
+                      : 'LIVE',
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w800,
@@ -297,10 +305,7 @@ class _TitleBlock extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
               ],
-              if (name.country != null) ...[
-                CountryTag(code: name.country!),
-                const SizedBox(width: 6),
-              ],
+              if (name.country != null) ...[CountryTag(code: name.country!), const SizedBox(width: 6)],
               if (details.isNotEmpty)
                 Flexible(
                   child: Text(
@@ -397,14 +402,14 @@ class QualityBadge extends StatelessWidget {
   final QualityTag tag;
 
   static Color colorOf(QualityTag tag) => switch (tag) {
-        QualityTag.uhd => const Color(0xFFFFB020),
-        QualityTag.fhd => const Color(0xFF4C8DFF),
-        QualityTag.hd => const Color(0xFF2EC4B6),
-        QualityTag.sd => const Color(0xFF8A919E),
-        QualityTag.hevc => const Color(0xFFB07CFF),
-        QualityTag.fps50 => const Color(0xFF3DD68C),
-        QualityTag.raw => const Color(0xFFFF7A6B),
-      };
+    QualityTag.uhd => const Color(0xFFFFB020),
+    QualityTag.fhd => const Color(0xFF4C8DFF),
+    QualityTag.hd => const Color(0xFF2EC4B6),
+    QualityTag.sd => const Color(0xFF8A919E),
+    QualityTag.hevc => const Color(0xFFB07CFF),
+    QualityTag.fps50 => const Color(0xFF3DD68C),
+    QualityTag.raw => const Color(0xFFFF7A6B),
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -434,10 +439,7 @@ class CountryTag extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.07),
-        borderRadius: BorderRadius.circular(4),
-      ),
+      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.07), borderRadius: BorderRadius.circular(4)),
       child: Text(
         code,
         style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, color: AppColors.textSecondary, height: 1.2),
@@ -497,7 +499,9 @@ class Monogram extends StatelessWidget {
   ];
 
   static String initials(String name) {
-    final words = name.split(RegExp(r'[\s\-_.]+')).where((w) => w.isNotEmpty && RegExp(r'[A-Za-z0-9ÄÖÜäöü]').hasMatch(w));
+    final words = name
+        .split(RegExp(r'[\s\-_.]+'))
+        .where((w) => w.isNotEmpty && RegExp(r'[A-Za-z0-9ÄÖÜäöü]').hasMatch(w));
     final letters = words.take(2).map((w) => w.characters.first.toUpperCase()).join();
     return letters.isEmpty ? '?' : letters;
   }
@@ -563,7 +567,10 @@ class _LiveCardState extends ConsumerState<LiveCard> {
                     decoration: BoxDecoration(
                       color: AppColors.logoSurface,
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: isPlaying ? AppColors.accent : Colors.white10, width: isPlaying ? 2 : 1),
+                      border: Border.all(
+                        color: isPlaying ? AppColors.accent : Colors.white10,
+                        width: isPlaying ? 2 : 1,
+                      ),
                     ),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(9),
@@ -585,11 +592,17 @@ class _LiveCardState extends ConsumerState<LiveCard> {
                       name.title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 12.5, color: _hovered ? AppColors.textPrimary : AppColors.textSecondary),
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        color: _hovered ? AppColors.textPrimary : AppColors.textSecondary,
+                      ),
                     ),
                   ),
                   for (final q in name.qualities.take(2))
-                    Padding(padding: const EdgeInsets.only(left: 4), child: QualityBadge(tag: q)),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4),
+                      child: QualityBadge(tag: q),
+                    ),
                 ],
               ),
             ],

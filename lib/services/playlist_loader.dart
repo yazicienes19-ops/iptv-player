@@ -5,19 +5,15 @@ import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../models/playlist_credentials.dart';
+import 'http_client.dart';
 import 'm3u_parser.dart';
+import 'network_security.dart';
 
 /// Lädt M3U-Quellen (URL oder importierte Datei) und parst sie im Hintergrund.
 class PlaylistLoader {
-  PlaylistLoader({Dio? dio})
-      : _dio = dio ??
-            Dio(BaseOptions(
-              connectTimeout: const Duration(seconds: 20),
-              receiveTimeout: const Duration(minutes: 3),
-              headers: {'User-Agent': 'IPTVPlayer/1.0 (libmpv)'},
-            ));
+  PlaylistLoader({required this.dio});
 
-  final Dio _dio;
+  final Dio dio;
 
   Future<M3uPlaylist> loadM3u(PlaylistCredentials playlist) async {
     final Uint8List bytes;
@@ -25,12 +21,10 @@ class PlaylistLoader {
       bytes = await File(playlist.localFilePath!).readAsBytes();
     } else {
       try {
-        final response = await _dio.get<List<int>>(
-          playlist.m3uUrl!,
-          options: Options(responseType: ResponseType.bytes),
-        );
+        final response = await dio.get<List<int>>(playlist.m3uUrl!, options: Options(responseType: ResponseType.bytes));
         bytes = Uint8List.fromList(response.data ?? const []);
       } on DioException catch (e) {
+        if (isKillSwitchError(e)) throw const KillSwitchException();
         throw Exception('M3U konnte nicht geladen werden: ${e.message ?? e.error}');
       }
     }

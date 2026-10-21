@@ -7,6 +7,9 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 import '../models/channel.dart';
 import '../models/content_type.dart';
+import '../providers/app_providers.dart';
+import '../services/http_client.dart';
+import '../services/network_security.dart';
 import 'hls_resolver.dart';
 
 /// Bildformat-Umschalter: Original, Zoom (beschneiden), Strecken.
@@ -79,7 +82,7 @@ class PlayerController extends Notifier<PlaybackState> {
   static const maxRetries = 3;
   static const _startTimeout = Duration(seconds: 20);
 
-  final _hlsResolver = HlsResolver();
+  static const _hlsResolver = HlsResolver();
 
   late Player player;
   late VideoController videoController;
@@ -100,10 +103,7 @@ class PlayerController extends Notifier<PlaybackState> {
   @override
   PlaybackState build() {
     player = Player(
-      configuration: const PlayerConfiguration(
-        title: 'IPTV Player',
-        bufferSize: 64 * 1024 * 1024,
-      ),
+      configuration: const PlayerConfiguration(title: 'Pulse Media', bufferSize: 64 * 1024 * 1024),
     );
     videoController = VideoController(player);
 
@@ -126,6 +126,14 @@ class PlayerController extends Notifier<PlaybackState> {
       }),
     ]);
 
+    // Kill-Switch: Bricht das VPN während der Wiedergabe weg, sofort stoppen.
+    ref.listen(networkBlockedProvider, (_, blocked) {
+      if (blocked && state.channel != null) _blockByKillSwitch();
+    });
+
+    // Kein Festplatten-Cache: Stream-Inhalte und -URLs landen nie auf der Platte.
+    _setMpvOption('cache-on-disk', 'no');
+
     ref.onDispose(() {
       _cancelTimers();
       for (final s in _subscriptions) {
@@ -140,11 +148,7 @@ class PlayerController extends Notifier<PlaybackState> {
 
   Future<void> play(Channel channel, {List<Channel>? queue}) async {
     if (!channel.isPlayable) return;
-    state = state.copyWith(
-      channel: channel,
-      queue: queue,
-      retryAttempt: 0,
-    );
+    state = state.copyWith(channel: channel, queue: queue, retryAttempt: 0);
     await _open();
   }
 
@@ -204,7 +208,11 @@ class PlayerController extends Notifier<PlaybackState> {
 
     _acceptStartEvents = false;
     try {
-      final stream = await _hlsResolver.resolve(channel.streamUrl);
+      await ref.read(networkGuardProvider).ensureAllowed();
+      // Getarnter User-Agent auch für libmpv (gilt für Video- und angehängte Tonspuren).
+      await _setMpvOption('user-agent', ref.read(userAgentProvider));
+      if (session != _session) return;
+      final stream = await _hlsResolver.resolve(channel.streamUrl, ref.read(httpClientProvider));
       if (session != _session) return;
       // stop() setzt Breite und Position zurück, damit alte Werte nicht als Start zählen.
       await player.stop();
@@ -225,8 +233,30 @@ class PlayerController extends Notifier<PlaybackState> {
         ]);
       }
     } catch (e) {
-      if (session == _session) _onError('$e');
+      if (session != _session) return;
+      if (isKillSwitchError(e)) {
+        _blockByKillSwitch();
+      } else {
+        _onError('$e');
+      }
     }
+  }
+
+  /// Kein automatischer Neuversuch: Erst ein VPN hebt die Sperre auf.
+  void _blockByKillSwitch() {
+    _session++;
+    _cancelTimers();
+    player.stop();
+    state = state.copyWith(
+      isLoading: false,
+      error: () => '${const KillSwitchException()}\nVerbinde dein VPN und versuche es erneut.',
+      retryCountdown: () => null,
+    );
+  }
+
+  Future<void> _setMpvOption(String name, String value) async {
+    final platform = player.platform;
+    if (platform is NativePlayer) await platform.setProperty(name, value);
   }
 
   void _markStarted() {
@@ -274,10 +304,15 @@ class PlayerController extends Notifier<PlaybackState> {
 
   static String _describe(String raw) {
     final lower = raw.toLowerCase();
-    if (lower.contains('403') || lower.contains('forbidden')) return 'Zugriff verweigert (403). Zu viele Verbindungen oder Abo abgelaufen?';
-    if (lower.contains('404') || lower.contains('not found')) return 'Sender nicht gefunden (404). Er ist vermutlich offline.';
-    if (lower.contains('failed to open') || lower.contains('loading failed')) return 'Der Stream ist offline oder nicht erreichbar.';
-    return raw;
+    return switch (lower) {
+      _ when lower.contains('403') || lower.contains('forbidden') =>
+        'Zugriff verweigert (403). Zu viele Verbindungen oder Abo abgelaufen?',
+      _ when lower.contains('404') || lower.contains('not found') =>
+        'Sender nicht gefunden (404). Er ist vermutlich offline.',
+      _ when lower.contains('failed to open') || lower.contains('loading failed') =>
+        'Der Stream ist offline oder nicht erreichbar.',
+      _ => raw,
+    };
   }
 }
 

@@ -6,6 +6,8 @@ import '../models/channel.dart';
 import '../models/content_type.dart';
 import '../models/epg_item.dart';
 import '../models/playlist_credentials.dart';
+import 'http_client.dart';
+import 'network_security.dart';
 
 class XtreamException implements Exception {
   const XtreamException(this.message);
@@ -18,17 +20,10 @@ class XtreamException implements Exception {
 
 /// Client für die Xtream-Codes-`player_api.php`.
 class XtreamApi {
-  XtreamApi(this.credentials, {Dio? dio})
-      : _dio = dio ??
-            Dio(BaseOptions(
-              connectTimeout: const Duration(seconds: 15),
-              receiveTimeout: const Duration(seconds: 60),
-              // Viele Panels prüfen den User-Agent; ein Player-typischer Wert wird überall akzeptiert.
-              headers: {'User-Agent': 'IPTVPlayer/1.0 (libmpv)'},
-            ));
+  XtreamApi(this.credentials, {required this.dio});
 
   final PlaylistCredentials credentials;
-  final Dio _dio;
+  final Dio dio;
 
   String get _server => credentials.normalizedServer;
   String get _user => Uri.encodeComponent(credentials.username ?? '');
@@ -36,7 +31,7 @@ class XtreamApi {
 
   Future<dynamic> _get(String? action, [Map<String, Object?> params = const {}]) async {
     try {
-      final response = await _dio.get<dynamic>(
+      final response = await dio.get<dynamic>(
         '$_server/player_api.php',
         queryParameters: {
           'username': credentials.username,
@@ -47,8 +42,10 @@ class XtreamApi {
       );
       return response.data;
     } on DioException catch (e) {
+      if (isKillSwitchError(e)) throw XtreamException('${const KillSwitchException()}');
       throw XtreamException(switch (e.type) {
-        DioExceptionType.connectionTimeout || DioExceptionType.receiveTimeout => 'Server antwortet nicht (Zeitüberschreitung).',
+        DioExceptionType.connectionTimeout ||
+        DioExceptionType.receiveTimeout => 'Server antwortet nicht (Zeitüberschreitung).',
         DioExceptionType.badResponse => 'Server-Fehler ${e.response?.statusCode}.',
         _ => 'Verbindung fehlgeschlagen: ${e.message ?? e.error}',
       });
@@ -121,7 +118,9 @@ class XtreamApi {
           final id = '${json['id']}';
           final ext = json['container_extension'] ?? 'mp4';
           final episodeNum = int.tryParse('${json['episode_num']}') ?? 0;
-          final epInfo = json['info'] is Map ? (json['info'] as Map).cast<String, dynamic>() : const <String, dynamic>{};
+          final epInfo = json['info'] is Map
+              ? (json['info'] as Map).cast<String, dynamic>()
+              : const <String, dynamic>{};
           final title = (json['title'] as String?)?.trim();
           return Episode(
             number: episodeNum,
@@ -135,8 +134,7 @@ class XtreamApi {
               logo: _text(epInfo['movie_image']) ?? series.logo,
             ),
           );
-        }).toList()
-          ..sort((a, b) => a.number.compareTo(b.number));
+        }).toList()..sort((a, b) => a.number.compareTo(b.number));
         seasons.add(Season(number: number, episodes: items));
       }
       seasons.sort((a, b) => a.number.compareTo(b.number));

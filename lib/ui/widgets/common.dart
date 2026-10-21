@@ -58,9 +58,7 @@ class _SearchFieldState extends ConsumerState<SearchField> {
 
 /// Lade- und Fehlerzustände für Kataloge, mit „Erneut laden“.
 class AsyncStateView extends StatelessWidget {
-  const AsyncStateView.loading({super.key})
-      : error = null,
-        onRetry = null;
+  const AsyncStateView.loading({super.key}) : error = null, onRetry = null;
 
   const AsyncStateView.error({super.key, required Object this.error, required this.onRetry});
 
@@ -80,7 +78,11 @@ class AsyncStateView extends StatelessWidget {
           children: [
             const Icon(Icons.cloud_off_rounded, size: 40, color: AppColors.textSecondary),
             const SizedBox(height: 12),
-            Text('$error', textAlign: TextAlign.center, style: const TextStyle(color: AppColors.textSecondary)),
+            Text(
+              '$error',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AppColors.textSecondary),
+            ),
             const SizedBox(height: 16),
             FilledButton.tonal(onPressed: onRetry, child: const Text('Erneut laden')),
           ],
@@ -106,7 +108,11 @@ class EmptyView extends StatelessWidget {
           children: [
             Icon(icon, size: 40, color: AppColors.textSecondary),
             const SizedBox(height: 12),
-            Text(message, textAlign: TextAlign.center, style: const TextStyle(color: AppColors.textSecondary)),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AppColors.textSecondary),
+            ),
           ],
         ),
       ),

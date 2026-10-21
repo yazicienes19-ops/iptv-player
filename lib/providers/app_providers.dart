@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -8,8 +9,11 @@ import '../models/channel_name.dart';
 import '../models/content_type.dart';
 import '../models/epg_item.dart';
 import '../models/playlist_credentials.dart';
+import '../services/app_settings.dart';
+import '../services/http_client.dart';
 import '../services/local_store.dart';
 import '../services/m3u_parser.dart';
+import '../services/network_security.dart';
 import '../services/playlist_loader.dart';
 import '../services/xtream_api.dart';
 
@@ -18,9 +22,62 @@ final sharedPreferencesProvider = Provider<SharedPreferences>(
   (ref) => throw UnimplementedError('sharedPreferencesProvider muss überschrieben werden'),
 );
 
-final localStoreProvider = Provider((ref) => LocalStore(ref.watch(sharedPreferencesProvider)));
+/// Wird in `main()` mit dem geöffneten Speicher (inkl. Schlüsselbund) überschrieben.
+final localStoreProvider = Provider<LocalStore>(
+  (ref) => throw UnimplementedError('localStoreProvider muss überschrieben werden'),
+);
 
-final playlistLoaderProvider = Provider((ref) => PlaylistLoader());
+// ---------------------------------------------------------------------------
+// Einstellungen, VPN-Wächter, HTTP
+// ---------------------------------------------------------------------------
+
+class SettingsNotifier extends Notifier<AppSettings> {
+  @override
+  AppSettings build() => AppSettings.load(ref.watch(sharedPreferencesProvider));
+
+  Future<void> update(AppSettings Function(AppSettings) change) async {
+    state = change(state);
+    await state.save(ref.read(sharedPreferencesProvider));
+  }
+}
+
+final settingsProvider = NotifierProvider<SettingsNotifier, AppSettings>(SettingsNotifier.new);
+
+final userAgentProvider = Provider<String>((ref) => ref.watch(settingsProvider.select((s) => s.userAgent)));
+
+final networkSecurityProvider = Provider((ref) => const NetworkSecurityService());
+
+/// Aktueller VPN-Zustand, alle 3 Sekunden neu geprüft.
+final vpnStatusProvider = StreamProvider<VpnStatus>((ref) => ref.watch(networkSecurityProvider).watch());
+
+final networkGuardProvider = Provider<NetworkGuard>(
+  (ref) => NetworkGuard(
+    killSwitch: ref.watch(settingsProvider.select((s) => s.killSwitch)),
+    service: ref.watch(networkSecurityProvider),
+  ),
+);
+
+/// `true`, wenn der Kill-Switch gerade jede Verbindung sperrt.
+final networkBlockedProvider = Provider<bool>((ref) {
+  final killSwitch = ref.watch(settingsProvider.select((s) => s.killSwitch));
+  if (!killSwitch) return false;
+  return !(ref.watch(vpnStatusProvider).value?.active ?? false);
+});
+
+final httpClientProvider = Provider<Dio>(
+  (ref) => createHttpClient(userAgent: ref.watch(userAgentProvider), guard: ref.watch(networkGuardProvider)),
+);
+
+final playlistLoaderProvider = Provider(
+  (ref) => PlaylistLoader(
+    dio: createHttpClient(
+      userAgent: ref.watch(userAgentProvider),
+      guard: ref.watch(networkGuardProvider),
+      connectTimeout: const Duration(seconds: 20),
+      receiveTimeout: const Duration(minutes: 3),
+    ),
+  ),
+);
 
 // ---------------------------------------------------------------------------
 // Playlists
@@ -77,7 +134,7 @@ final activePlaylistProvider = Provider<PlaylistCredentials?>((ref) => ref.watch
 
 final xtreamApiProvider = Provider<XtreamApi?>((ref) {
   final playlist = ref.watch(activePlaylistProvider);
-  return playlist != null && playlist.isXtream ? XtreamApi(playlist) : null;
+  return playlist != null && playlist.isXtream ? XtreamApi(playlist, dio: ref.watch(httpClientProvider)) : null;
 });
 
 // ---------------------------------------------------------------------------
@@ -110,8 +167,10 @@ final mediaDetailsProvider = FutureProvider.family<MediaDetails, Channel>((ref, 
 });
 
 /// Einträge nach Kategorie gruppiert, in Katalog-Reihenfolge (für die Reihen-Ansicht).
-final channelsByCategoryProvider =
-    Provider.family<AsyncValue<List<(Category, List<Channel>)>>, ContentType>((ref, type) {
+final channelsByCategoryProvider = Provider.family<AsyncValue<List<(Category, List<Channel>)>>, ContentType>((
+  ref,
+  type,
+) {
   return ref.watch(catalogProvider(type)).whenData((catalog) {
     final grouped = <String, List<Channel>>{};
     for (final channel in catalog.channels) {
@@ -166,8 +225,9 @@ class SelectedCategoryNotifier extends Notifier<Category?> {
   void select(Category? category) => state = category;
 }
 
-final selectedCategoryProvider =
-    NotifierProvider.family<SelectedCategoryNotifier, Category?, ContentType>(SelectedCategoryNotifier.new);
+final selectedCategoryProvider = NotifierProvider.family<SelectedCategoryNotifier, Category?, ContentType>(
+  SelectedCategoryNotifier.new,
+);
 
 class SearchQueryNotifier extends Notifier<String> {
   SearchQueryNotifier(this.section);
@@ -238,7 +298,7 @@ class FavoritesNotifier extends Notifier<List<Channel>> {
   List<Channel> build() {
     final playlist = ref.watch(activePlaylistProvider);
     if (playlist == null) return const [];
-    return ref.watch(localStoreProvider).loadFavorites(playlist.id);
+    return ref.watch(localStoreProvider).loadFavorites(playlist);
   }
 
   bool contains(Channel channel) => state.contains(channel);
@@ -247,7 +307,7 @@ class FavoritesNotifier extends Notifier<List<Channel>> {
     final playlist = ref.read(activePlaylistProvider);
     if (playlist == null || channel.isSeparator) return;
     state = state.contains(channel) ? state.where((c) => c != channel).toList() : [...state, channel];
-    await ref.read(localStoreProvider).saveFavorites(playlist.id, state);
+    await ref.read(localStoreProvider).saveFavorites(playlist, state);
   }
 }
 

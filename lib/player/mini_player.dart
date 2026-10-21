@@ -23,8 +23,8 @@ class MiniPlayer extends ConsumerWidget {
     final status = state.hasError
         ? (state.retryCountdown != null ? 'Neuer Versuch in ${state.retryCountdown} s' : 'Stream nicht verfügbar')
         : state.isLoading
-            ? 'Wird geladen …'
-            : channel.type.label;
+        ? 'Wird geladen …'
+        : channel.type.label;
 
     return Material(
       color: AppColors.surfaceHigh,
@@ -49,12 +49,17 @@ class MiniPlayer extends ConsumerWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(channel.display.title, maxLines: 1, overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w600)),
-                    Text(status,
-                        maxLines: 1,
-                        style: TextStyle(
-                            fontSize: 12, color: state.hasError ? AppColors.live : AppColors.textSecondary)),
+                    Text(
+                      channel.display.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    Text(
+                      status,
+                      maxLines: 1,
+                      style: TextStyle(fontSize: 12, color: state.hasError ? AppColors.live : AppColors.textSecondary),
+                    ),
                   ],
                 ),
               ),

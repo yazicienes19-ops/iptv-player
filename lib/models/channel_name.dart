@@ -48,7 +48,10 @@ class ChannelName {
     r'^\s*(?:\[([A-Za-z]{2,3})\]|\|([A-Za-z]{2,3})\||([A-Z]{2,3}(?:-[A-Z]{2})?)\s*(?::|\||\s-\s))\s*',
   );
   static final _bracketNote = RegExp(r'\[([^\]]+)\]');
-  static final _resolution = RegExp(r'\(?\b(2160|1440|1080|720|576|540|480|360|270|240)[pi]\b\)?', caseSensitive: false);
+  static final _resolution = RegExp(
+    r'\(?\b(2160|1440|1080|720|576|540|480|360|270|240)[pi]\b\)?',
+    caseSensitive: false,
+  );
 
   static const _qualityTokens = <String, QualityTag>{
     '4K': QualityTag.uhd,

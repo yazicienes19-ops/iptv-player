@@ -5,6 +5,8 @@ import '../../player/mini_player.dart';
 import '../../player/player_controller.dart';
 import '../../providers/app_providers.dart';
 import '../playlists/playlist_sheet.dart';
+import '../settings/settings_page.dart';
+import '../widgets/vpn_badge.dart';
 import '../browse/browse_view.dart';
 import '../widgets/section_content.dart';
 import 'home_shell.dart';
@@ -27,6 +29,12 @@ class CompactLayout extends ConsumerWidget {
             onPressed: () => showPlaylistSheet(context),
             icon: const Icon(Icons.playlist_play_rounded),
             label: Text(playlist?.name ?? '', overflow: TextOverflow.ellipsis),
+          ),
+          const VpnBadge(iconOnly: true),
+          IconButton(
+            tooltip: 'Einstellungen',
+            icon: const Icon(Icons.settings_rounded),
+            onPressed: () => Navigator.of(context).push(SettingsPage.route()),
           ),
         ],
       ),

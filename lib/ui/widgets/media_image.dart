@@ -1,11 +1,14 @@
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../providers/app_providers.dart';
 
 import '../theme.dart';
 
 /// Netzwerkbild mit sanftem Einblenden und ruhigem Platzhalter.
-class MediaImage extends StatelessWidget {
+class MediaImage extends ConsumerWidget {
   const MediaImage({
     super.key,
     required this.url,
@@ -24,11 +27,13 @@ class MediaImage extends StatelessWidget {
   final EdgeInsets padding;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final fallback = placeholder ?? const ColoredBox(color: AppColors.surfaceHigh);
-    if (url == null) return fallback;
+    // Kill-Switch ohne VPN: auch Logos und Poster nicht laden.
+    if (url == null || ref.watch(networkBlockedProvider)) return fallback;
     return Image.network(
       url!,
+      headers: {'User-Agent': ref.watch(userAgentProvider)},
       fit: fit,
       cacheWidth: cacheWidth,
       // Der Fehler-Platzhalter läuft nicht durch frameBuilder, bleibt also ungepolstert.
@@ -74,9 +79,7 @@ class _BlurredPoster extends StatelessWidget {
   Widget build(BuildContext context) {
     if (poster == null) {
       return const DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(colors: [Color(0xFF2A1215), AppColors.background]),
-        ),
+        decoration: BoxDecoration(gradient: LinearGradient(colors: [Color(0xFF2A1215), AppColors.background])),
       );
     }
     return ClipRect(

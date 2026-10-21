@@ -1,5 +1,7 @@
 import 'package:dio/dio.dart';
 
+import '../services/http_client.dart';
+
 /// Eine zusätzliche Tonspur aus `#EXT-X-MEDIA:TYPE=AUDIO`.
 class HlsAudioRendition {
   const HlsAudioRendition({required this.url, required this.name, this.language, this.isDefault = false});
@@ -23,26 +25,28 @@ class ResolvedStream {
 /// bleiben dort beim Öffnen ewig stehen. Stattdessen öffnen wir direkt die
 /// beste Bildvariante und hängen die Tonspuren einzeln an.
 class HlsResolver {
-  HlsResolver({Dio? dio})
-      : _dio = dio ??
-            Dio(BaseOptions(
-              connectTimeout: const Duration(seconds: 6),
-              receiveTimeout: const Duration(seconds: 6),
-              headers: {'User-Agent': 'IPTVPlayer/1.0 (libmpv)'},
-              responseType: ResponseType.plain,
-            ));
-
-  final Dio _dio;
+  const HlsResolver();
 
   static bool looksLikeHls(String url) => Uri.tryParse(url)?.path.toLowerCase().endsWith('.m3u8') ?? false;
 
   /// Bei Netzfehlern oder normalen Playlists bleibt es bei der Original-URL.
-  Future<ResolvedStream> resolve(String url) async {
+  Future<ResolvedStream> resolve(String url, Dio dio) async {
     if (!looksLikeHls(url)) return ResolvedStream(url);
     try {
-      final response = await _dio.get<String>(url);
+      final response = await dio.get<String>(
+        url,
+        options: Options(
+          responseType: ResponseType.plain,
+          sendTimeout: const Duration(seconds: 6),
+          receiveTimeout: const Duration(seconds: 6),
+        ),
+      );
       final finalUrl = response.realUri.toString();
       return parseMaster(response.data ?? '', finalUrl) ?? ResolvedStream(url);
+    } on DioException catch (e) {
+      // Den Kill-Switch nicht verschlucken; alles andere fällt auf die Original-URL zurück.
+      if (isKillSwitchError(e)) rethrow;
+      return ResolvedStream(url);
     } catch (_) {
       return ResolvedStream(url);
     }
@@ -66,12 +70,16 @@ class HlsResolver {
         if (uri == null) continue;
         hasSeparateTracks = true;
         if (attrs['TYPE'] == 'AUDIO') {
-          audioByGroup.putIfAbsent(attrs['GROUP-ID'] ?? '', () => []).add(HlsAudioRendition(
-                url: base.resolve(uri).toString(),
-                name: attrs['NAME'] ?? attrs['LANGUAGE'] ?? 'Ton',
-                language: attrs['LANGUAGE'],
-                isDefault: attrs['DEFAULT'] == 'YES',
-              ));
+          audioByGroup
+              .putIfAbsent(attrs['GROUP-ID'] ?? '', () => [])
+              .add(
+                HlsAudioRendition(
+                  url: base.resolve(uri).toString(),
+                  name: attrs['NAME'] ?? attrs['LANGUAGE'] ?? 'Ton',
+                  language: attrs['LANGUAGE'],
+                  isDefault: attrs['DEFAULT'] == 'YES',
+                ),
+              );
         }
       } else if (line.startsWith('#EXT-X-STREAM-INF:')) {
         final attrs = _attributes(line.substring(18));
@@ -94,9 +102,8 @@ class HlsResolver {
   static final _attributePattern = RegExp(r'([A-Z0-9-]+)=("[^"]*"|[^,]*)');
 
   static Map<String, String> _attributes(String text) => {
-        for (final m in _attributePattern.allMatches(text))
-          m.group(1)!: m.group(2)!.replaceAll('"', ''),
-      };
+    for (final m in _attributePattern.allMatches(text)) m.group(1)!: m.group(2)!.replaceAll('"', ''),
+  };
 }
 
 class _Variant {
