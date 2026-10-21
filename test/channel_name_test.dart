@@ -41,4 +41,31 @@ void main() {
     expect(ChannelName.parse('HD Plus Info').title, 'HD Plus Info');
     expect(ChannelName.parse('ZDF').title, 'ZDF');
   });
+
+  test('Anbieter-Präfixe und Jahreszahl bei Filmen und Serien', () {
+    final a = ChannelName.parse('(DE-) K2: Das Letzte Abenteuer - 1991');
+    expect(a.title, 'K2: Das Letzte Abenteuer');
+    expect(a.year, 1991);
+    expect(a.country, 'DE');
+
+    final b = ChannelName.parse('(V|DE) Dune: Part Two (2024)');
+    expect(b.title, 'Dune: Part Two');
+    expect(b.year, 2024);
+
+    expect(ChannelName.parse('(S|DE) 4 Blocks S01 E01').title, '4 Blocks S01 E01');
+    expect(ChannelName.parse('Blade Runner 2049').year, isNull);
+    expect(ChannelName.parse('1917').title, '1917');
+  });
+
+  test('Kategorien: Kürzel weg, Sprache erkannt, Jahres-Kategorien umbenannt', () {
+    final a = CategoryTitle.parse('(S|DE) Deutsche Serien');
+    expect(a.name, 'Deutsche Serien');
+    expect(a.language?.code, 'de');
+
+    expect(CategoryTitle.parse('(V|DE) Filme - 2026', currentYear: 2026).name, 'Neuerscheinungen 2026');
+    expect(CategoryTitle.parse('(V|DE) Filme - 2019', currentYear: 2026).name, 'Filme 2019');
+    expect(CategoryTitle.parse('|TR| Yerli Diziler').language?.code, 'tr');
+    expect(CategoryTitle.parse('UK - Sports').language?.code, 'en');
+    expect(CategoryTitle.parse('VIP | Action').language, isNull);
+  });
 }

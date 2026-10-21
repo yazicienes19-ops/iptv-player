@@ -201,6 +201,8 @@ Future<void> wipeAllLocalData(WidgetRef ref) async {
     ..invalidate(playlistsProvider)
     ..invalidate(settingsProvider)
     ..invalidate(favoritesProvider)
+    ..invalidate(recentChannelsProvider)
+    ..invalidate(languageFilterProvider)
     ..invalidate(hideSeparatorsProvider)
     ..invalidate(sectionProvider)
     ..invalidate(m3uPlaylistProvider);

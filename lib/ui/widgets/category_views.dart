@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../models/category.dart';
 import '../../models/content_type.dart';
 import '../../providers/app_providers.dart';
 import '../theme.dart';
+import 'glass.dart';
+import 'tv_focus.dart';
 
 /// Kategorien für die linke Spalte (macOS / iPad quer): Filterfeld, „Alle“
 /// mit Gesamtzahl und Senderzahl je Kategorie.
@@ -34,8 +35,8 @@ class _CategoryListState extends ConsumerState<CategoryList> {
     final counts = ref.watch(categoryCountsProvider(type));
     final notifier = ref.read(selectedCategoryProvider(type).notifier);
     final query = _filter.text.trim().toLowerCase();
-    final categories = (catalog.value?.categories ?? const <Category>[])
-        .where((c) => (counts[c.id] ?? 0) > 0)
+    final categories = ref
+        .watch(filteredCategoriesProvider(type))
         .where((c) => query.isEmpty || c.name.toLowerCase().contains(query))
         .toList();
     final allLabel = switch (type) {
@@ -82,6 +83,7 @@ class _CategoryListState extends ConsumerState<CategoryList> {
               itemBuilder: (context, index) {
                 final category = query.isEmpty ? (index == 0 ? null : categories[index - 1]) : categories[index];
                 return _CategoryItem(
+                  icon: category == null ? Icons.apps_rounded : iconForCategory(category.name),
                   label: category?.name ?? allLabel,
                   count: counts[category?.id] ?? 0,
                   selected: category == selected,
@@ -103,6 +105,7 @@ class _CategoryListState extends ConsumerState<CategoryList> {
 
 class _CategoryItem extends StatefulWidget {
   const _CategoryItem({
+    required this.icon,
     required this.label,
     required this.count,
     required this.selected,
@@ -110,6 +113,7 @@ class _CategoryItem extends StatefulWidget {
     required this.onTap,
   });
 
+  final IconData icon;
   final String label;
   final int count;
   final bool selected;
@@ -122,9 +126,19 @@ class _CategoryItem extends StatefulWidget {
 
 class _CategoryItemState extends State<_CategoryItem> {
   bool _hovered = false;
+  bool _focused = false;
+
+  /// Maus darüber oder per Fernbedienung/Tastatur fokussiert.
+  bool get _lit => _hovered || _focused;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => TvFocus(
+    onActivate: widget.onTap,
+    onFocusChange: (v) => setState(() => _focused = v),
+    child: FocusRing(visible: _focused, radius: 20, child: _buildTile(context)),
+  );
+
+  Widget _buildTile(BuildContext context) {
     final selected = widget.selected;
     return MouseRegion(
       cursor: SystemMouseCursors.click,
@@ -139,7 +153,7 @@ class _CategoryItemState extends State<_CategoryItem> {
           decoration: BoxDecoration(
             color: selected
                 ? AppColors.accent.withValues(alpha: 0.16)
-                : _hovered
+                : _lit
                 ? AppColors.surface
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(20),
@@ -147,6 +161,8 @@ class _CategoryItemState extends State<_CategoryItem> {
           ),
           child: Row(
             children: [
+              Icon(widget.icon, size: 17, color: selected ? AppColors.textPrimary : AppColors.textSecondary),
+              const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   widget.label,
@@ -194,7 +210,7 @@ class CategoryChips extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final categories = ref.watch(catalogProvider(type)).value?.categories ?? const <Category>[];
+    final categories = ref.watch(filteredCategoriesProvider(type));
     final selected = ref.watch(selectedCategoryProvider(type));
     final notifier = ref.read(selectedCategoryProvider(type).notifier);
     if (categories.isEmpty) return const SizedBox.shrink();

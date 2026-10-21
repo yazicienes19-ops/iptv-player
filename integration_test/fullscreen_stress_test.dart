@@ -35,29 +35,28 @@ void main() {
     final store = await LocalStore.open(prefs, SecureStore());
     final navigatorKey = GlobalKey<NavigatorState>();
 
-    await tester.pumpWidget(ProviderScope(
-      overrides: [
-        sharedPreferencesProvider.overrideWithValue(prefs),
-        localStoreProvider.overrideWithValue(store),
-      ],
-      child: MaterialApp(
-        navigatorKey: navigatorKey,
-        theme: buildAppTheme(),
-        // Wie die Detailseite: weichgezeichneter Hintergrund unter dem Vollbild.
-        home: const Scaffold(
-          body: Stack(
-            fit: StackFit.expand,
-            children: [
-              BackdropImage(
-                backdrop: null,
-                poster: 'https://upload.wikimedia.org/wikipedia/commons/8/8f/Sintel_poster.jpg',
-              ),
-              Center(child: Text('Start')),
-            ],
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [sharedPreferencesProvider.overrideWithValue(prefs), localStoreProvider.overrideWithValue(store)],
+        child: MaterialApp(
+          navigatorKey: navigatorKey,
+          theme: buildAppTheme(),
+          // Wie die Detailseite: weichgezeichneter Hintergrund unter dem Vollbild.
+          home: const Scaffold(
+            body: Stack(
+              fit: StackFit.expand,
+              children: [
+                BackdropImage(
+                  backdrop: null,
+                  poster: 'https://upload.wikimedia.org/wikipedia/commons/8/8f/Sintel_poster.jpg',
+                ),
+                Center(child: Text('Start')),
+              ],
+            ),
           ),
         ),
       ),
-    ));
+    );
     final container = ProviderScope.containerOf(tester.element(find.text('Start')));
     final controller = container.read(playerControllerProvider.notifier);
 
@@ -66,7 +65,12 @@ void main() {
       'https://download.blender.org/demo/movies/ToS/tears_of_steel_720p.mov',
     ];
     for (var i = 0; i < rounds; i++) {
-      final channel = Channel(id: 'm$i', name: 'Film $i', streamUrl: movies[i % movies.length], type: ContentType.movie);
+      final channel = Channel(
+        id: 'm$i',
+        name: 'Film $i',
+        streamUrl: movies[i % movies.length],
+        type: ContentType.movie,
+      );
       controller.play(channel, queue: [channel]);
       navigatorKey.currentState!.push(FullscreenPlayerPage.route());
       await wait(tester, const Duration(milliseconds: 2500));

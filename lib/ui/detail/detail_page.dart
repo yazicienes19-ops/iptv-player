@@ -3,12 +3,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/catalog.dart';
 import '../../models/channel.dart';
+import '../../models/channel_name.dart';
 import '../../models/content_type.dart';
 import '../../providers/app_providers.dart';
+import '../browse/browse_view.dart';
 import '../browse/poster_card.dart';
 import '../theme.dart';
 import '../widgets/channel_views.dart';
+import '../widgets/glass.dart';
 import '../widgets/media_image.dart';
+import '../widgets/tv_focus.dart';
 
 /// Detailseite für Filme und Serien im Netflix-Stil.
 class DetailPage extends ConsumerStatefulWidget {
@@ -49,10 +53,12 @@ class _DetailPageState extends ConsumerState<DetailPage> {
         .take(20)
         .toList();
 
+    final name = channel.display;
+    final year = name.year ?? int.tryParse(details.year ?? '');
     final meta = [
-      ...details.metaParts,
+      ?details.genre,
+      ?details.duration,
       if (details.rating != null && details.rating! > 0) '★ ${details.rating!.toStringAsFixed(1)}',
-      if (isSeries && seasons.isNotEmpty) seasons.length == 1 ? '1 Staffel' : '${seasons.length} Staffeln',
     ];
 
     void play() {
@@ -69,12 +75,23 @@ class _DetailPageState extends ConsumerState<DetailPage> {
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
-          channel.name,
+          name.title,
           style: (compact ? textTheme.headlineSmall : textTheme.displaySmall)?.copyWith(
             fontWeight: FontWeight.w800,
             height: 1.05,
             letterSpacing: -0.5,
           ),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            if (year != null) MetaBadge(text: '$year'),
+            for (final q in name.qualities.take(2)) QualityBadge(tag: q),
+            if (isSeries && seasons.isNotEmpty) MetaBadge(text: seasonSummary(seasons), filled: false),
+          ],
         ),
         if (meta.isNotEmpty) ...[
           const SizedBox(height: 10),
@@ -167,7 +184,7 @@ class _DetailPageState extends ConsumerState<DetailPage> {
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
-                        colors: [Color(0x330B0C10), Color(0x000B0C10), AppColors.background],
+                        colors: [Color(0x330A0C10), Color(0x000A0C10), AppColors.background],
                         stops: [0, 0.4, 1],
                       ),
                     ),
@@ -175,7 +192,7 @@ class _DetailPageState extends ConsumerState<DetailPage> {
                   if (!compact) ...[
                     const DecoratedBox(
                       decoration: BoxDecoration(
-                        gradient: LinearGradient(colors: [Color(0xE60B0C10), Color(0x000B0C10)], stops: [0.1, 0.75]),
+                        gradient: LinearGradient(colors: [Color(0xE60A0C10), Color(0x000A0C10)], stops: [0.1, 0.75]),
                       ),
                     ),
                     Padding(
@@ -191,7 +208,11 @@ class _DetailPageState extends ConsumerState<DetailPage> {
                                 aspectRatio: PosterCard.aspectRatio,
                                 child: MediaImage(
                                   url: channel.logo,
-                                  placeholder: TitlePlaceholder(title: channel.name),
+                                  placeholder: TitlePlaceholder(
+                                    title: channel.display.title,
+                                    year: channel.display.year,
+                                    isSeries: channel.type == ContentType.series,
+                                  ),
                                 ),
                               ),
                             ),
@@ -213,7 +234,11 @@ class _DetailPageState extends ConsumerState<DetailPage> {
                               aspectRatio: PosterCard.aspectRatio,
                               child: MediaImage(
                                 url: channel.logo,
-                                placeholder: TitlePlaceholder(title: channel.name),
+                                placeholder: TitlePlaceholder(
+                                  title: channel.display.title,
+                                  year: channel.display.year,
+                                  isSeries: channel.type == ContentType.series,
+                                ),
                               ),
                             ),
                           ),
@@ -260,36 +285,36 @@ class _DetailPageState extends ConsumerState<DetailPage> {
                 child: Row(
                   children: [
                     Text('Folgen', style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
-                    const Spacer(),
-                    if (seasons.length > 1)
-                      DropdownButtonHideUnderline(
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          decoration: BoxDecoration(
-                            color: AppColors.surfaceHigh,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: AppColors.border),
-                          ),
-                          child: DropdownButton<int>(
-                            value: _seasonIndex.clamp(0, seasons.length - 1),
-                            dropdownColor: AppColors.surfaceHigh,
-                            borderRadius: BorderRadius.circular(8),
-                            items: [
-                              for (var i = 0; i < seasons.length; i++)
-                                DropdownMenuItem(value: i, child: Text('Staffel ${seasons[i].number}')),
-                            ],
-                            onChanged: (i) => setState(() => _seasonIndex = i ?? 0),
-                          ),
-                        ),
-                      ),
+                    const SizedBox(width: 12),
+                    Text(
+                      '${season!.episodes.length} in Staffel ${season.number}',
+                      style: const TextStyle(color: AppColors.textSecondary),
+                    ),
                   ],
                 ),
               ),
             ),
+            if (seasons.length > 1)
+              SliverToBoxAdapter(
+                child: SizedBox(
+                  height: 52,
+                  child: ListView.separated(
+                    scrollDirection: Axis.horizontal,
+                    padding: EdgeInsets.fromLTRB(hPad, 4, hPad, 8),
+                    itemCount: seasons.length,
+                    separatorBuilder: (_, _) => const SizedBox(width: 8),
+                    itemBuilder: (context, i) => GlassPill(
+                      label: 'Staffel ${seasons[i].number}',
+                      selected: i == _seasonIndex.clamp(0, seasons.length - 1),
+                      onTap: () => setState(() => _seasonIndex = i),
+                    ),
+                  ),
+                ),
+              ),
             SliverPadding(
               padding: EdgeInsets.fromLTRB(hPad, 0, hPad, 40),
               sliver: SliverList.separated(
-                itemCount: season!.episodes.length,
+                itemCount: season.episodes.length,
                 separatorBuilder: (_, _) => const Divider(height: 1),
                 itemBuilder: (context, i) => _EpisodeTile(
                   episode: season.episodes[i],
@@ -347,9 +372,19 @@ class _EpisodeTile extends StatefulWidget {
 
 class _EpisodeTileState extends State<_EpisodeTile> {
   bool _hovered = false;
+  bool _focused = false;
+
+  /// Maus darüber oder per Fernbedienung/Tastatur fokussiert.
+  bool get _lit => _hovered || _focused;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => TvFocus(
+    onActivate: widget.onPlay,
+    onFocusChange: (v) => setState(() => _focused = v),
+    child: FocusRing(visible: _focused, radius: 8, child: _buildTile(context)),
+  );
+
+  Widget _buildTile(BuildContext context) {
     final episode = widget.episode;
     final number = episode.number > 0 ? episode.number : widget.index + 1;
     final thumbWidth = widget.compact ? 128.0 : 168.0;
@@ -363,7 +398,7 @@ class _EpisodeTileState extends State<_EpisodeTile> {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
           decoration: BoxDecoration(
-            color: _hovered ? AppColors.surface : Colors.transparent,
+            color: _lit ? AppColors.surface : Colors.transparent,
             borderRadius: BorderRadius.circular(8),
           ),
           child: Row(
@@ -392,7 +427,7 @@ class _EpisodeTileState extends State<_EpisodeTile> {
                         MediaImage(url: episode.channel.logo, cacheWidth: (thumbWidth * 2).round()),
                         Center(
                           child: AnimatedOpacity(
-                            opacity: _hovered || widget.compact ? 1 : 0,
+                            opacity: _lit || widget.compact ? 1 : 0,
                             duration: const Duration(milliseconds: 150),
                             child: const Icon(
                               Icons.play_circle_outline_rounded,

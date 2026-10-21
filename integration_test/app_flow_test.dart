@@ -59,8 +59,7 @@ Future<String> awaitPlayback(WidgetTester tester, ProviderContainer container, {
   return 'ZEITÜBERSCHREITUNG im Test';
 }
 
-Finder fieldWithHint(String hint) =>
-    find.byWidgetPredicate((w) => w is TextField && w.decoration?.hintText == hint);
+Finder fieldWithHint(String hint) => find.byWidgetPredicate((w) => w is TextField && w.decoration?.hintText == hint);
 
 void pop(WidgetTester tester) => tester.state<NavigatorState>(find.byType(Navigator).first).pop();
 
@@ -80,35 +79,42 @@ void main() {
     await secure.deleteAll();
     final store = await LocalStore.open(prefs, secure);
     await store.savePlaylists([
-      const PlaylistCredentials(id: 'demo', name: 'Demo (öffentliche Sender)', kind: PlaylistKind.m3uUrl, m3uUrl: playlistUrl),
+      const PlaylistCredentials(
+        id: 'demo',
+        name: 'Demo (öffentliche Sender)',
+        kind: PlaylistKind.m3uUrl,
+        m3uUrl: playlistUrl,
+      ),
     ]);
     await store.saveActivePlaylistId('demo');
 
     // Gleicher Widget-Baum für beide Größen, damit Player und Zustand erhalten bleiben.
     final phone = ValueNotifier(false);
-    await tester.pumpWidget(ValueListenableBuilder(
-      valueListenable: phone,
-      builder: (context, isPhone, child) => ColoredBox(
-        color: const Color(0xFF000000),
-        child: Align(
-          alignment: Alignment.topLeft,
-          child: ConstrainedBox(
-            constraints: isPhone ? BoxConstraints.tight(const Size(393, 852)) : const BoxConstraints(),
-            child: child,
+    await tester.pumpWidget(
+      ValueListenableBuilder(
+        valueListenable: phone,
+        builder: (context, isPhone, child) => ColoredBox(
+          color: const Color(0xFF000000),
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: ConstrainedBox(
+              constraints: isPhone ? BoxConstraints.tight(const Size(393, 852)) : const BoxConstraints(),
+              child: child,
+            ),
           ),
         ),
+        child: ProviderScope(
+          retry: (_, _) => null,
+          overrides: [sharedPreferencesProvider.overrideWithValue(prefs), localStoreProvider.overrideWithValue(store)],
+          child: const IptvApp(),
+        ),
       ),
-      child: ProviderScope(
-        retry: (_, _) => null,
-        overrides: [
-          sharedPreferencesProvider.overrideWithValue(prefs),
-          localStoreProvider.overrideWithValue(store),
-        ],
-        child: const IptvApp(),
-      ),
-    ));
+    );
     await wait(tester, const Duration(seconds: 4));
     final container = ProviderScope.containerOf(tester.element(find.byType(HomeShell)));
+    // Die App startet auf der Startseite; die Senderprüfungen beginnen bei Live TV.
+    container.read(languageFilterProvider.notifier).select(null);
+    container.read(sectionProvider.notifier).select(AppSection.live);
     final controller = container.read(playerControllerProvider.notifier);
 
     final live = (await container.read(catalogProvider(ContentType.live).future)).channels;
@@ -130,8 +136,7 @@ void main() {
 
     // Unordentliche Namen, Trennzeilen und Qualitäts-Badges
     await tester.tap(find.descendant(of: fieldWithHint('Live TV durchsuchen'), matching: find.byIcon(Icons.close)));
-    final formatting = (await container.read(catalogProvider(ContentType.live).future))
-        .categories
+    final formatting = (await container.read(catalogProvider(ContentType.live).future)).categories
         .firstWhere((c) => c.name == 'DE | Formatierung');
     container.read(selectedCategoryProvider(ContentType.live).notifier).select(formatting);
     await wait(tester, const Duration(seconds: 1));
@@ -157,8 +162,10 @@ void main() {
     await controller.play(byName(live, 'tagesschau24'), queue: live);
     await awaitPlayback(tester, container);
     await controller.next();
-    report('Kanalwechsel → ${container.read(playerControllerProvider).channel?.name}',
-        await awaitPlayback(tester, container));
+    report(
+      'Kanalwechsel → ${container.read(playerControllerProvider).channel?.name}',
+      await awaitPlayback(tester, container),
+    );
 
     // --- Filme / VOD inkl. MOV, AVI, HLS ---
     for (final channel in movies) {
@@ -183,7 +190,10 @@ void main() {
     if (audio.length > 1) {
       await controller.player.setAudioTrack(audio[1]);
       await wait(tester, const Duration(seconds: 2));
-      report('Tonspur wechseln', 'aktiv: ${controller.player.state.track.audio.title ?? controller.player.state.track.audio.id}');
+      report(
+        'Tonspur wechseln',
+        'aktiv: ${controller.player.state.track.audio.title ?? controller.player.state.track.audio.id}',
+      );
     }
     await controller.stop();
 
@@ -222,7 +232,13 @@ void main() {
 
     // Favoriten füllen und anzeigen
     final favorites = container.read(favoritesProvider.notifier);
-    for (final c in [byName(live, 'Das Erste'), byName(live, 'tagesschau24'), byName(live, 'KiKA HD'), tos, byName(movies, 'Sintel')]) {
+    for (final c in [
+      byName(live, 'Das Erste'),
+      byName(live, 'tagesschau24'),
+      byName(live, 'KiKA HD'),
+      tos,
+      byName(movies, 'Sintel'),
+    ]) {
       await favorites.toggle(c);
     }
     container.read(sectionProvider.notifier).select(AppSection.favorites);
@@ -245,7 +261,8 @@ void main() {
         .transform(utf8.decoder)
         .join();
     final seen = (jsonDecode(await uaLog) as List).cast<Map<String, dynamic>>();
-    String agentsFor(String path) => seen.where((e) => (e['path'] as String).startsWith(path)).map((e) => e['ua']).toSet().join(' | ');
+    String agentsFor(String path) =>
+        seen.where((e) => (e['path'] as String).startsWith(path)).map((e) => e['ua']).toSet().join(' | ');
     report('User-Agent beim M3U-Abruf', agentsFor('/test.m3u'));
     report('User-Agent von libmpv', agentsFor('/ua-probe'));
 
@@ -255,7 +272,9 @@ void main() {
     await wait(tester, const Duration(seconds: 2));
     report('Kill-Switch ohne VPN', container.read(playerControllerProvider).error ?? 'NICHT blockiert!');
     await shot(tester, '12_killswitch');
-    container.read(settingsProvider.notifier).update((s) => s.copyWith(killSwitch: false, userAgentPreset: UserAgentPreset.vlc));
+    container
+        .read(settingsProvider.notifier)
+        .update((s) => s.copyWith(killSwitch: false, userAgentPreset: UserAgentPreset.vlc));
     await controller.stop();
 
     container.read(searchQueryProvider(AppSection.live).notifier).set('');

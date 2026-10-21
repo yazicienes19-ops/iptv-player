@@ -22,6 +22,7 @@ class LocalStore {
   static const _legacyPlaylistsKey = 'playlists.v1';
   static const _activeKey = 'playlists.active.v1';
   static String _favoritesKey(String playlistId) => 'favorites.v2.$playlistId';
+  static String _recentsKey(String playlistId) => 'recents.v1.$playlistId';
   static String _secretKey(String playlistId) => 'playlist.$playlistId';
 
   static Future<LocalStore> open(SharedPreferences prefs, SecureStore secure) async {
@@ -94,8 +95,19 @@ class LocalStore {
   /// Favoriten werden komplett gespeichert, damit der Favoriten-Tab ohne
   /// geladenen Katalog sofort angezeigt werden kann. Zugangsdaten in den
   /// Stream-URLs werden dabei durch Platzhalter ersetzt.
-  List<Channel> loadFavorites(PlaylistCredentials playlist) {
-    final raw = _prefs.getString(_favoritesKey(playlist.id));
+  List<Channel> loadFavorites(PlaylistCredentials playlist) => _loadChannels(_favoritesKey(playlist.id), playlist);
+
+  Future<void> saveFavorites(PlaylistCredentials playlist, List<Channel> favorites) =>
+      _saveChannels(_favoritesKey(playlist.id), playlist, favorites);
+
+  /// Zuletzt gesehene Live-Sender (neueste zuerst), ebenfalls ohne Zugangsdaten.
+  List<Channel> loadRecents(PlaylistCredentials playlist) => _loadChannels(_recentsKey(playlist.id), playlist);
+
+  Future<void> saveRecents(PlaylistCredentials playlist, List<Channel> recents) =>
+      _saveChannels(_recentsKey(playlist.id), playlist, recents);
+
+  List<Channel> _loadChannels(String key, PlaylistCredentials playlist) {
+    final raw = _prefs.getString(key);
     if (raw == null) return [];
     final redactor = UrlRedactor.forPlaylist(playlist);
     return (jsonDecode(raw) as List)
@@ -104,15 +116,19 @@ class LocalStore {
         .toList();
   }
 
-  Future<void> saveFavorites(PlaylistCredentials playlist, List<Channel> favorites) {
+  Future<void> _saveChannels(String key, PlaylistCredentials playlist, List<Channel> channels) {
     final redactor = UrlRedactor.forPlaylist(playlist);
     final json = [
-      for (final c in favorites) {...c.toJson(), 'streamUrl': redactor.redact(c.streamUrl)},
+      for (final c in channels) {...c.toJson(), 'streamUrl': redactor.redact(c.streamUrl)},
     ];
-    return _prefs.setString(_favoritesKey(playlist.id), jsonEncode(json));
+    return _prefs.setString(key, jsonEncode(json));
   }
 
-  Future<void> deleteFavorites(String playlistId) => _prefs.remove(_favoritesKey(playlistId));
+  /// Favoriten und Verlauf einer gelöschten Playlist entfernen.
+  Future<void> deleteFavorites(String playlistId) async {
+    await _prefs.remove(_favoritesKey(playlistId));
+    await _prefs.remove(_recentsKey(playlistId));
+  }
 
   /// Panik-Knopf: entfernt Playlists, Favoriten, Einstellungen und Schlüsselbund.
   Future<void> wipe() async {

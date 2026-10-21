@@ -6,7 +6,9 @@ import '../../player/player_controller.dart';
 import '../../providers/app_providers.dart';
 import '../playlists/playlist_sheet.dart';
 import '../settings/settings_page.dart';
+import '../widgets/glass.dart';
 import '../widgets/vpn_badge.dart';
+import 'home_view.dart';
 import '../browse/browse_view.dart';
 import '../widgets/section_content.dart';
 import 'home_shell.dart';
@@ -25,10 +27,11 @@ class CompactLayout extends ConsumerWidget {
       appBar: AppBar(
         title: Text(section.label, style: const TextStyle(fontWeight: FontWeight.w700)),
         actions: [
-          TextButton.icon(
-            onPressed: () => showPlaylistSheet(context),
+          const LanguageFilterButton(compact: true),
+          IconButton(
+            tooltip: playlist?.name ?? 'Playlist',
             icon: const Icon(Icons.playlist_play_rounded),
-            label: Text(playlist?.name ?? '', overflow: TextOverflow.ellipsis),
+            onPressed: () => showPlaylistSheet(context),
           ),
           const VpnBadge(iconOnly: true),
           IconButton(
@@ -39,6 +42,7 @@ class CompactLayout extends ConsumerWidget {
         ],
       ),
       body: switch (section) {
+        AppSection.home => const HomeView(compact: true),
         AppSection.live => const LiveChannelsView(compact: true),
         AppSection.favorites => const FavoritesView(compact: true),
         _ => BrowseView(key: ValueKey(section), type: section.contentType!, compact: true),

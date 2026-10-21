@@ -8,6 +8,7 @@ import '../models/channel.dart';
 import '../models/channel_name.dart';
 import '../models/content_type.dart';
 import '../models/epg_item.dart';
+import '../models/language.dart';
 import '../models/playlist_credentials.dart';
 import '../services/app_settings.dart';
 import '../services/http_client.dart';
@@ -21,6 +22,9 @@ import '../services/xtream_api.dart';
 final sharedPreferencesProvider = Provider<SharedPreferences>(
   (ref) => throw UnimplementedError('sharedPreferencesProvider muss überschrieben werden'),
 );
+
+/// `true` auf Android TV / Google TV / Fire TV; wird in `main()` überschrieben.
+final isTelevisionProvider = Provider<bool>((ref) => false);
 
 /// Wird in `main()` mit dem geöffneten Speicher (inkl. Schlüsselbund) überschrieben.
 final localStoreProvider = Provider<LocalStore>(
@@ -158,11 +162,80 @@ final catalogProvider = FutureProvider.family<Catalog, ContentType>((ref, type) 
 /// Detailinfos für Filme und Serien (bei Serien inklusive Staffeln).
 final mediaDetailsProvider = FutureProvider.family<MediaDetails, Channel>((ref, channel) async {
   final api = ref.watch(xtreamApiProvider);
-  if (api == null || channel.xtreamStreamId == null) return MediaDetails.empty;
+  if (api == null) {
+    // M3U: Staffeln stammen aus der Zusammenfassung beim Einlesen.
+    if (channel.type != ContentType.series) return MediaDetails.empty;
+    final catalog = await ref.watch(catalogProvider(ContentType.series).future);
+    return MediaDetails(seasons: catalog.seriesSeasons[channel.id] ?? const []);
+  }
+  if (channel.xtreamStreamId == null) return MediaDetails.empty;
   return switch (channel.type) {
     ContentType.movie => api.getVodDetails(channel),
     ContentType.series => api.getSeriesDetails(channel),
     ContentType.live => MediaDetails.empty,
+  };
+});
+
+// ---------------------------------------------------------------------------
+// Länder-/Sprachfilter
+// ---------------------------------------------------------------------------
+
+/// Gewählte Sprache (Code aus [Language]) oder `null` für „Alle“.
+class LanguageFilterNotifier extends Notifier<String?> {
+  static const _key = 'filter.language.v1';
+  static const _all = 'all';
+
+  @override
+  String? build() {
+    final stored = ref.watch(sharedPreferencesProvider).getString(_key);
+    if (stored == null) return 'de';
+    return stored == _all ? null : stored;
+  }
+
+  Future<void> select(String? code) async {
+    state = code;
+    await ref.read(sharedPreferencesProvider).setString(_key, code ?? _all);
+  }
+}
+
+final languageFilterProvider = NotifierProvider<LanguageFilterNotifier, String?>(LanguageFilterNotifier.new);
+
+/// Sprachen, die in der Playlist tatsächlich vorkommen (nach Häufigkeit).
+final availableLanguagesProvider = Provider<List<Language>>((ref) {
+  final counts = <String, int>{};
+  for (final type in ContentType.values) {
+    for (final category in ref.watch(catalogProvider(type)).value?.categories ?? const <Category>[]) {
+      final code = category.language;
+      if (code != null) counts[code] = (counts[code] ?? 0) + 1;
+    }
+  }
+  final codes = counts.keys.toList()..sort((a, b) => counts[b]!.compareTo(counts[a]!));
+  return [for (final code in codes) ?Language.byCode(code)];
+});
+
+/// Kategorien ohne erkennbare Sprache gelten für jede Auswahl.
+bool _matchesLanguage(Category category, String? filter) =>
+    filter == null || category.language == null || category.language == filter;
+
+/// Kategorien einer Inhaltsart, gefiltert nach Sprache und ohne leere.
+final filteredCategoriesProvider = Provider.family<List<Category>, ContentType>((ref, type) {
+  final categories = ref.watch(catalogProvider(type)).value?.categories ?? const <Category>[];
+  final filter = ref.watch(languageFilterProvider);
+  final counts = ref.watch(categoryCountsProvider(type));
+  return [
+    for (final c in categories)
+      if (_matchesLanguage(c, filter) && (counts[c.id] ?? 0) > 0) c,
+  ];
+});
+
+/// Kategorie-IDs, die der Sprachfilter durchlässt (für schnelle Abfragen).
+final _allowedCategoryIdsProvider = Provider.family<Set<String>?, ContentType>((ref, type) {
+  final filter = ref.watch(languageFilterProvider);
+  if (filter == null) return null;
+  final categories = ref.watch(catalogProvider(type)).value?.categories ?? const <Category>[];
+  return {
+    for (final c in categories)
+      if (_matchesLanguage(c, filter)) c.id,
   };
 });
 
@@ -171,6 +244,7 @@ final channelsByCategoryProvider = Provider.family<AsyncValue<List<(Category, Li
   ref,
   type,
 ) {
+  final filter = ref.watch(languageFilterProvider);
   return ref.watch(catalogProvider(type)).whenData((catalog) {
     final grouped = <String, List<Channel>>{};
     for (final channel in catalog.channels) {
@@ -179,7 +253,8 @@ final channelsByCategoryProvider = Provider.family<AsyncValue<List<(Category, Li
     }
     return [
       for (final category in catalog.categories)
-        if (grouped[category.id]?.isNotEmpty == true) (category, grouped[category.id]!),
+        if (_matchesLanguage(category, filter) && grouped[category.id]?.isNotEmpty == true)
+          (category, grouped[category.id]!),
     ];
   });
 });
@@ -189,6 +264,7 @@ final channelsByCategoryProvider = Provider.family<AsyncValue<List<(Category, Li
 // ---------------------------------------------------------------------------
 
 enum AppSection {
+  home(null),
   live(ContentType.live),
   movies(ContentType.movie),
   series(ContentType.series),
@@ -198,12 +274,16 @@ enum AppSection {
 
   final ContentType? contentType;
 
-  String get label => contentType?.label ?? 'Favoriten';
+  String get label => switch (this) {
+    AppSection.home => 'Startseite',
+    AppSection.favorites => 'Favoriten',
+    _ => contentType!.label,
+  };
 }
 
 class SectionNotifier extends Notifier<AppSection> {
   @override
-  AppSection build() => AppSection.live;
+  AppSection build() => AppSection.home;
 
   void select(AppSection section) => state = section;
 }
@@ -252,11 +332,16 @@ final visibleChannelsProvider = Provider.family<AsyncValue<List<Channel>>, Conte
   final section = AppSection.values.firstWhere((s) => s.contentType == type);
   final query = ref.watch(searchQueryProvider(section)).trim().toLowerCase();
   final keepSeparators = type == ContentType.live && query.isEmpty && !ref.watch(hideSeparatorsProvider);
+  final allowed = ref.watch(_allowedCategoryIdsProvider(type));
 
   return catalog.whenData((c) {
     Iterable<Channel> result = c.channels;
     if (!keepSeparators) result = result.where((ch) => !ch.isSeparator);
-    if (category != null) result = result.where((ch) => ch.categoryId == category.id);
+    if (category != null) {
+      result = result.where((ch) => ch.categoryId == category.id);
+    } else if (allowed != null) {
+      result = result.where((ch) => allowed.contains(ch.categoryId));
+    }
     if (query.isNotEmpty) result = result.where((ch) => ch.name.toLowerCase().contains(query));
     return result.toList();
   });
@@ -265,11 +350,13 @@ final visibleChannelsProvider = Provider.family<AsyncValue<List<Channel>>, Conte
 /// Anzahl echter Einträge (ohne Trennzeilen) je Kategorie-ID, Schlüssel `null` = alle.
 final categoryCountsProvider = Provider.family<Map<String?, int>, ContentType>((ref, type) {
   final channels = ref.watch(catalogProvider(type)).value?.channels ?? const <Channel>[];
+  final allowed = ref.watch(_allowedCategoryIdsProvider(type));
   final counts = <String?, int>{null: 0};
   for (final channel in channels) {
     if (channel.isSeparator) continue;
-    counts[null] = counts[null]! + 1;
     counts[channel.categoryId] = (counts[channel.categoryId] ?? 0) + 1;
+    // „Alle“ zählt nur, was der Sprachfilter zeigt.
+    if (allowed == null || allowed.contains(channel.categoryId)) counts[null] = counts[null]! + 1;
   }
   return counts;
 });
@@ -312,6 +399,130 @@ class FavoritesNotifier extends Notifier<List<Channel>> {
 }
 
 final favoritesProvider = NotifierProvider<FavoritesNotifier, List<Channel>>(FavoritesNotifier.new);
+
+// ---------------------------------------------------------------------------
+// Live-TV-Dashboard
+// ---------------------------------------------------------------------------
+
+/// Zuletzt gesehene Live-Sender, neueste zuerst, höchstens [max].
+class RecentChannelsNotifier extends Notifier<List<Channel>> {
+  static const max = 12;
+
+  @override
+  List<Channel> build() {
+    final playlist = ref.watch(activePlaylistProvider);
+    if (playlist == null) return const [];
+    return ref.watch(localStoreProvider).loadRecents(playlist);
+  }
+
+  Future<void> add(Channel channel) async {
+    final playlist = ref.read(activePlaylistProvider);
+    if (playlist == null || channel.type != ContentType.live || channel.isSeparator) return;
+    state = [channel, ...state.where((c) => c != channel)].take(max).toList();
+    await ref.read(localStoreProvider).saveRecents(playlist, state);
+  }
+}
+
+final recentChannelsProvider = NotifierProvider<RecentChannelsNotifier, List<Channel>>(RecentChannelsNotifier.new);
+
+/// Bekannte große Sender je Sprache, in der Reihenfolge der Senderplätze.
+const _popularByLanguage = <String, List<String>>{
+  'de': [
+    'das erste',
+    'zdf',
+    'rtl',
+    'sat.1',
+    'sat 1',
+    'prosieben',
+    'pro7',
+    'vox',
+    'kabel eins',
+    'kabel 1',
+    'rtl zwei',
+    'rtl2',
+    'super rtl',
+    'nitro',
+    'n-tv',
+    'ntv',
+    'welt',
+    'tagesschau24',
+    'phoenix',
+    '3sat',
+    'arte',
+    'zdfneo',
+    'zdfinfo',
+    'one',
+    'kika',
+    'sport1',
+    'dmax',
+    'tele 5',
+    'sixx',
+    'prosieben maxx',
+    'eurosport',
+    'comedy central',
+    'nickelodeon',
+    'br',
+    'wdr',
+    'ndr',
+    'mdr',
+    'swr',
+    'hr',
+    'rbb',
+  ],
+  'tr': [
+    'trt 1',
+    'show tv',
+    'star tv',
+    'atv',
+    'kanal d',
+    'now',
+    'fox',
+    'tv8',
+    'kanal 7',
+    'tv 100',
+    'halk tv',
+    'trt haber',
+    'cnn türk',
+    'cnn turk',
+    'ntv',
+    'haberturk',
+    'habertürk',
+    'a haber',
+    'trt spor',
+    'beyaz tv',
+    'teve2',
+  ],
+  'sq': ['top channel', 'klan', 'vizion plus', 'rtsh', 'tv klan', 'news 24', 'abc news', 'top news', 'rtk', 'kanal 10'],
+  'en': ['bbc one', 'bbc two', 'itv', 'channel 4', 'channel 5', 'sky news', 'bbc news', 'cnn', 'sky one', 'e4'],
+};
+
+/// Schnellwahl fürs Dashboard: bekannte Sender der gewählten Sprache, je Name
+/// nur einmal (bevorzugt mit Logo und höherer Qualität); sonst die ersten Sender.
+final popularLiveChannelsProvider = Provider<List<Channel>>((ref) {
+  final channels = ref.watch(visibleChannelsProvider(ContentType.live)).value ?? const <Channel>[];
+  final names = _popularByLanguage[ref.watch(languageFilterProvider) ?? 'de'] ?? _popularByLanguage['de']!;
+  final best = <String, Channel>{};
+  for (final channel in channels) {
+    if (channel.isSeparator) continue;
+    final title = channel.display.title.toLowerCase();
+    // Längster Treffer gewinnt: „RTL ZWEI“ ist nicht „RTL“.
+    final match = names
+        .where((n) => title == n || title.startsWith('$n '))
+        .fold<String?>(null, (best, n) => best == null || n.length > best.length ? n : best);
+    if (match == null) continue;
+    final current = best[match];
+    int rank(Channel c) =>
+        (c.logo != null ? 10 : 0) + (c.display.qualities.isEmpty ? 0 : 5 - c.display.qualities.first.index);
+    if (current == null || rank(channel) > rank(current)) best[match] = channel;
+  }
+  final popular = [for (final n in names) ?best[n]];
+  if (popular.length >= 6) return popular.take(24).toList();
+  // Unbekannte Sprache oder kleine Liste: einfach die ersten Sender mit Logo.
+  return [
+    ...popular,
+    ...channels.where((c) => !c.isSeparator && c.logo != null && !popular.contains(c)),
+  ].take(24).toList();
+});
 
 final visibleFavoritesProvider = Provider<List<Channel>>((ref) {
   final favorites = ref.watch(favoritesProvider);

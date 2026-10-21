@@ -28,10 +28,14 @@ http://example.com/stream.m3u8
     expect(live.channels.map((c) => c.name), ['Das Erste HD', 'ZDF, HD', 'Pluto TV Movies', 'Ohne Gruppe']);
     expect(live.channels.first.logo, 'http://logo/ard.png');
     expect(live.channels.first.epgChannelId, 'das.erste');
-    expect(live.categories.map((c) => c.name), ['DE | Vollprogramm', 'Movies', 'Sonstiges']);
+    expect(live.categories.map((c) => c.name), ['Vollprogramm', 'Movies', 'Sonstiges']);
+    expect(live.categories.first.language, 'de');
 
     expect(result[ContentType.movie].channels.map((c) => c.name), ['Ein Film (2024)', 'HLS Film']);
-    expect(result[ContentType.series].channels.single.streamUrl, endsWith('/series/u/p/20.mp4'));
+    final series = result[ContentType.series];
+    expect(series.channels.single.name, 'Serie');
+    final episode = series.seriesSeasons[series.channels.single.id]!.single.episodes.single;
+    expect(episode.channel.streamUrl, endsWith('/series/u/p/20.mp4'));
   });
 
   test('IDs bleiben bei doppelten URLs eindeutig', () {

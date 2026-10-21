@@ -10,6 +10,7 @@ import '../../providers/app_providers.dart';
 import '../detail/detail_page.dart';
 import '../theme.dart';
 import 'media_image.dart';
+import 'tv_focus.dart';
 
 /// Live-Sender laufen sofort im eingebetteten Player, Filme und Serien
 /// öffnen erst ihre Detailseite. Trennzeilen sind nicht anklickbar.
@@ -175,9 +176,20 @@ class ChannelTile extends ConsumerStatefulWidget {
 
 class _ChannelTileState extends ConsumerState<ChannelTile> {
   bool _hovered = false;
+  bool _focused = false;
+
+  /// Maus darüber oder per Fernbedienung/Tastatur fokussiert.
+  bool get _lit => _hovered || _focused;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => TvFocus(
+    onActivate: () => openChannel(context, ref, widget.channel, widget.queue),
+    onFocusChange: (v) => setState(() => _focused = v),
+    onSecondary: () => ref.read(favoritesProvider.notifier).toggle(widget.channel),
+    child: FocusRing(visible: _focused, radius: 12, child: _buildTile(context)),
+  );
+
+  Widget _buildTile(BuildContext context) {
     final channel = widget.channel;
     final name = channel.display;
     final playback = ref.watch(playerControllerProvider.select((s) => s.channel == channel ? s : null));
@@ -199,11 +211,11 @@ class _ChannelTileState extends ConsumerState<ChannelTile> {
             clipBehavior: Clip.antiAlias,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(12),
-              color: isPlaying ? null : (_hovered ? AppColors.surface : Colors.transparent),
+              color: isPlaying ? null : (_lit ? AppColors.surface : Colors.transparent),
               gradient: isPlaying
                   ? LinearGradient(colors: [AppColors.accent.withValues(alpha: 0.20), AppColors.surfaceHigh])
                   : null,
-              border: Border.all(color: _hovered && !isPlaying ? Colors.white10 : Colors.transparent),
+              border: Border.all(color: _lit && !isPlaying ? Colors.white10 : Colors.transparent),
             ),
             child: Row(
               children: [
@@ -239,14 +251,17 @@ class _ChannelTileState extends ConsumerState<ChannelTile> {
                       child: QualityBadge(tag: q),
                     ),
                 if (!widget.dense)
-                  AnimatedOpacity(
-                    opacity: isFavorite || _hovered ? 1 : 0,
-                    duration: const Duration(milliseconds: 150),
-                    child: IconButton(
-                      tooltip: isFavorite ? 'Aus Favoriten entfernen' : 'Zu Favoriten',
-                      icon: Icon(isFavorite ? Icons.star_rounded : Icons.star_outline_rounded, size: 20),
-                      color: isFavorite ? Colors.amber : AppColors.textSecondary,
-                      onPressed: () => ref.read(favoritesProvider.notifier).toggle(channel),
+                  ExcludeFocus(
+                    // Auf dem Fernseher: Menü-Taste statt unsichtbarem Fokusziel.
+                    child: AnimatedOpacity(
+                      opacity: isFavorite || _lit ? 1 : 0,
+                      duration: const Duration(milliseconds: 150),
+                      child: IconButton(
+                        tooltip: isFavorite ? 'Aus Favoriten entfernen' : 'Zu Favoriten',
+                        icon: Icon(isFavorite ? Icons.star_rounded : Icons.star_outline_rounded, size: 20),
+                        color: isFavorite ? Colors.amber : AppColors.textSecondary,
+                        onPressed: () => ref.read(favoritesProvider.notifier).toggle(channel),
+                      ),
                     ),
                   )
                 else
@@ -542,9 +557,16 @@ class LiveCard extends ConsumerStatefulWidget {
 
 class _LiveCardState extends ConsumerState<LiveCard> {
   bool _hovered = false;
+  bool _focused = false;
+
+  /// Maus darüber oder per Fernbedienung/Tastatur fokussiert.
+  bool get _lit => _hovered || _focused;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) =>
+      TvFocus(onActivate: widget.onTap, onFocusChange: (v) => setState(() => _focused = v), child: _buildTile(context));
+
+  Widget _buildTile(BuildContext context) {
     final isPlaying = ref.watch(playerControllerProvider.select((s) => s.channel == widget.channel));
     final name = widget.channel.display;
     return MouseRegion(
@@ -559,7 +581,7 @@ class _LiveCardState extends ConsumerState<LiveCard> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               AnimatedScale(
-                scale: _hovered ? 1.04 : 1,
+                scale: _lit ? 1.04 : 1,
                 duration: const Duration(milliseconds: 180),
                 child: AspectRatio(
                   aspectRatio: 16 / 9,
@@ -592,10 +614,7 @@ class _LiveCardState extends ConsumerState<LiveCard> {
                       name.title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        color: _hovered ? AppColors.textPrimary : AppColors.textSecondary,
-                      ),
+                      style: TextStyle(fontSize: 12.5, color: _lit ? AppColors.textPrimary : AppColors.textSecondary),
                     ),
                   ),
                   for (final q in name.qualities.take(2))

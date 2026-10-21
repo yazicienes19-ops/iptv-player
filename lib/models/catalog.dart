@@ -3,12 +3,15 @@ import 'channel.dart';
 
 /// Kategorien und Einträge einer Inhaltsart (z. B. alle Live-Sender).
 class Catalog {
-  const Catalog({required this.categories, required this.channels});
+  const Catalog({required this.categories, required this.channels, this.seriesSeasons = const {}});
 
   static const empty = Catalog(categories: [], channels: []);
 
   final List<Category> categories;
   final List<Channel> channels;
+
+  /// Nur bei M3U: zusammengefasste Serien (Serien-ID → Staffeln).
+  final Map<String, List<Season>> seriesSeasons;
 }
 
 /// Eine Serienfolge; [channel] ist der abspielbare Stream.

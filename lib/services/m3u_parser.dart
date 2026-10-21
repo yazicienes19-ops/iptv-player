@@ -6,6 +6,7 @@ import '../models/catalog.dart';
 import '../models/category.dart';
 import '../models/channel.dart';
 import '../models/content_type.dart';
+import 'series_aggregator.dart';
 
 /// Ergebnis einer M3U-Analyse, nach Inhaltsart getrennt.
 class M3uPlaylist {
@@ -56,7 +57,7 @@ class M3uParser {
             : (extGroup?.isNotEmpty == true ? extGroup! : 'Ohne Kategorie');
         final category = categories[type]!.putIfAbsent(
           groupName,
-          () => Category(id: groupName, name: groupName, type: type),
+          () => Category.cleaned(id: groupName, rawName: groupName, type: type),
         );
         final name = (title?.isNotEmpty == true ? title : attributes['tvg-name']) ?? url;
         final logo = attributes['tvg-logo'];
@@ -78,9 +79,17 @@ class M3uParser {
       }
     }
 
+    // Einzelfolgen zu Serien zusammenfassen (sonst zehntausende Karten im Serien-Tab).
+    final series = SeriesAggregator.aggregate(channels[ContentType.series]!);
     return M3uPlaylist({
       for (final type in ContentType.values)
-        type: Catalog(categories: categories[type]!.values.toList(), channels: channels[type]!),
+        type: type == ContentType.series
+            ? Catalog(
+                categories: categories[type]!.values.toList(),
+                channels: series.series,
+                seriesSeasons: series.seasons,
+              )
+            : Catalog(categories: categories[type]!.values.toList(), channels: channels[type]!),
     });
   }
 

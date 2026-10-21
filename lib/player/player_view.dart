@@ -11,6 +11,7 @@ import '../models/content_type.dart';
 import '../providers/app_providers.dart';
 import '../ui/theme.dart';
 import '../ui/widgets/channel_views.dart';
+import '../ui/widgets/tv_focus.dart';
 import 'player_controller.dart';
 
 /// Video mit eigener Overlay-Steuerung. Wird eingebettet und im Vollbild genutzt.
@@ -29,18 +30,28 @@ class _PlayerViewState extends ConsumerState<PlayerView> {
   bool _switcherOpen = false;
   Timer? _hideTimer;
   final _focusNode = FocusNode(debugLabel: 'PlayerView');
+  bool _focusVisible = false;
 
   @override
   void initState() {
     super.initState();
+    _focusNode.addListener(_updateFocusRing);
     _scheduleHide();
   }
 
   @override
   void dispose() {
     _hideTimer?.cancel();
+    _focusNode.removeListener(_updateFocusRing);
     _focusNode.dispose();
     super.dispose();
+  }
+
+  /// Rahmen nur bei Fernbedienung/Tastatur, nicht nach Mausklicks.
+  void _updateFocusRing() {
+    final visible = _focusNode.hasFocus && FocusManager.instance.highlightMode == FocusHighlightMode.traditional;
+    if (visible != _focusVisible) setState(() => _focusVisible = visible);
+    if (visible) _showControls();
   }
 
   void _showControls() {
@@ -65,11 +76,39 @@ class _PlayerViewState extends ConsumerState<PlayerView> {
     final controller = ref.read(playerControllerProvider.notifier);
     final state = ref.watch(playerControllerProvider);
 
+    final isOnDemand = state.channel != null && state.channel!.type != ContentType.live;
+    void seek(int seconds) {
+      controller.player.seek(controller.player.state.position + Duration(seconds: seconds));
+      _showControls();
+    }
+
+    void select() {
+      // Eingebettet öffnet OK das Vollbild, im Vollbild pausiert es.
+      if (!widget.isFullscreen && widget.onToggleFullscreen != null) {
+        widget.onToggleFullscreen!();
+      } else {
+        controller.player.playOrPause();
+        _showControls();
+      }
+    }
+
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.space): controller.player.playOrPause,
+        const SingleActivator(LogicalKeyboardKey.mediaPlayPause): controller.player.playOrPause,
+        const SingleActivator(LogicalKeyboardKey.select): select,
+        const SingleActivator(LogicalKeyboardKey.enter): select,
         const SingleActivator(LogicalKeyboardKey.arrowUp): controller.previous,
         const SingleActivator(LogicalKeyboardKey.arrowDown): controller.next,
+        const SingleActivator(LogicalKeyboardKey.channelUp): controller.previous,
+        const SingleActivator(LogicalKeyboardKey.channelDown): controller.next,
+        // Links/rechts spulen nur bei Filmen; bei Live führen sie aus dem Player heraus.
+        if (isOnDemand) ...{
+          const SingleActivator(LogicalKeyboardKey.arrowLeft): () => seek(-10),
+          const SingleActivator(LogicalKeyboardKey.arrowRight): () => seek(10),
+          const SingleActivator(LogicalKeyboardKey.mediaRewind): () => seek(-30),
+          const SingleActivator(LogicalKeyboardKey.mediaFastForward): () => seek(30),
+        },
         const SingleActivator(LogicalKeyboardKey.keyF): () => widget.onToggleFullscreen?.call(),
         if (widget.isFullscreen)
           const SingleActivator(LogicalKeyboardKey.escape): () => widget.onToggleFullscreen?.call(),
@@ -87,39 +126,43 @@ class _PlayerViewState extends ConsumerState<PlayerView> {
               _controlsVisible ? setState(() => _controlsVisible = false) : _showControls();
             },
             onDoubleTap: widget.onToggleFullscreen,
-            child: ColoredBox(
-              color: Colors.black,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  if (state.channel != null)
-                    Video(controller: controller.videoController, controls: NoVideoControls, fit: state.fit.boxFit),
-                  _StatusLayer(state: state),
-                  if (state.channel != null)
-                    AnimatedOpacity(
-                      opacity: _controlsVisible ? 1 : 0,
-                      duration: const Duration(milliseconds: 200),
-                      child: IgnorePointer(
-                        ignoring: !_controlsVisible,
-                        child: _ControlsLayer(
-                          state: state,
-                          isFullscreen: widget.isFullscreen,
-                          onToggleFullscreen: widget.onToggleFullscreen,
-                          onToggleSwitcher: _toggleSwitcher,
-                          onInteraction: _showControls,
+            child: FocusRing(
+              visible: _focusVisible && !widget.isFullscreen,
+              radius: 0,
+              child: ColoredBox(
+                color: Colors.black,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (state.channel != null)
+                      Video(controller: controller.videoController, controls: NoVideoControls, fit: state.fit.boxFit),
+                    _StatusLayer(state: state),
+                    if (state.channel != null)
+                      AnimatedOpacity(
+                        opacity: _controlsVisible ? 1 : 0,
+                        duration: const Duration(milliseconds: 200),
+                        child: IgnorePointer(
+                          ignoring: !_controlsVisible,
+                          child: _ControlsLayer(
+                            state: state,
+                            isFullscreen: widget.isFullscreen,
+                            onToggleFullscreen: widget.onToggleFullscreen,
+                            onToggleSwitcher: _toggleSwitcher,
+                            onInteraction: _showControls,
+                          ),
                         ),
                       ),
+                    AnimatedPositioned(
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeOutCubic,
+                      top: 0,
+                      bottom: 0,
+                      right: _switcherOpen ? 0 : -320,
+                      width: 300,
+                      child: _ChannelSwitcher(onClose: _toggleSwitcher),
                     ),
-                  AnimatedPositioned(
-                    duration: const Duration(milliseconds: 220),
-                    curve: Curves.easeOutCubic,
-                    top: 0,
-                    bottom: 0,
-                    right: _switcherOpen ? 0 : -320,
-                    width: 300,
-                    child: _ChannelSwitcher(onClose: _toggleSwitcher),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),

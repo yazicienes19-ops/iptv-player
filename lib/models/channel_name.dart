@@ -1,4 +1,5 @@
 import 'channel.dart';
+import 'language.dart';
 
 /// Qualitätsangaben, die aus Sendernamen als farbige Badges herausgelöst werden.
 enum QualityTag {
@@ -23,7 +24,11 @@ class ChannelName {
     this.qualities = const [],
     this.notes = const [],
     this.isSeparator = false,
+    this.year,
   });
+
+  /// Erscheinungsjahr aus „Titel - 1991“ oder „Titel (2025)“; als Badge angezeigt.
+  final int? year;
 
   /// Anzeigename ohne Präfix und Qualitätsangaben.
   final String title;
@@ -44,6 +49,10 @@ class ChannelName {
   static ChannelName of(Channel channel) => _cache[channel] ??= parse(channel.name);
 
   static final _separatorPattern = RegExp(r'(-{3,}|={3,}|\*{3,}|#{3,}|_{3,}|~{3,}|•{3,})');
+
+  /// Anbieter-Präfixe wie `(DE-)`, `(V|DE)`, `(S|DE)`, `(DE)`; V = VOD, S = Serie.
+  static final _providerPrefix = RegExp(r'^\s*\(\s*(?:[A-Z]{1,3}\s*\|\s*)?([A-Z]{2,4})\s*-?\s*\)\s*');
+  static final _trailingYear = RegExp(r'\s*(?:[-–]\s*((?:19|20)\d{2})|\(\s*((?:19|20)\d{2})\s*\))\s*$');
   static final _countryPattern = RegExp(
     r'^\s*(?:\[([A-Za-z]{2,3})\]|\|([A-Za-z]{2,3})\||([A-Z]{2,3}(?:-[A-Z]{2})?)\s*(?::|\||\s-\s))\s*',
   );
@@ -78,9 +87,17 @@ class ChannelName {
     var text = raw.trim();
 
     String? country;
-    final countryMatch = _countryPattern.firstMatch(text);
-    if (countryMatch != null) {
-      country = (countryMatch.group(1) ?? countryMatch.group(2) ?? countryMatch.group(3))!.toUpperCase();
+    // Manche Anbieter stapeln Präfixe („(V|DE) DE: …“), daher bis zu zweimal.
+    for (var i = 0; i < 2; i++) {
+      final provider = _providerPrefix.firstMatch(text);
+      if (provider != null) {
+        country ??= provider.group(1)!.toUpperCase();
+        text = text.substring(provider.end);
+        continue;
+      }
+      final countryMatch = _countryPattern.firstMatch(text);
+      if (countryMatch == null) break;
+      country ??= (countryMatch.group(1) ?? countryMatch.group(2) ?? countryMatch.group(3))!.toUpperCase();
       text = text.substring(countryMatch.end);
     }
 
@@ -113,6 +130,12 @@ class ChannelName {
     }
 
     var title = _squash(kept.join(' ')).replaceAll(RegExp(r'^[\s|:\-–]+|[\s|:\-–]+$'), '');
+    int? year;
+    final yearMatch = _trailingYear.firstMatch(title);
+    if (yearMatch != null && yearMatch.start > 0) {
+      year = int.parse(yearMatch.group(1) ?? yearMatch.group(2)!);
+      title = title.substring(0, yearMatch.start).replaceAll(RegExp(r'[\s|:\-–]+$'), '');
+    }
     if (title.isEmpty) title = raw.trim();
 
     final sorted = qualities.toList()..sort((a, b) => a.index.compareTo(b.index));
@@ -120,14 +143,51 @@ class ChannelName {
     if (sorted.contains(QualityTag.uhd)) sorted.removeWhere((q) => q == QualityTag.fhd || q == QualityTag.hd);
     if (sorted.contains(QualityTag.fhd)) sorted.remove(QualityTag.hd);
 
-    return ChannelName(title: title, country: country, qualities: sorted, notes: notes);
+    return ChannelName(title: title, country: country, qualities: sorted, notes: notes, year: year);
   }
 
   static String _squash(String s) => s.replaceAll(RegExp(r'\s+'), ' ').trim();
+}
+
+/// Kategorienamen ohne Anbieter-Kürzel, plus erkannte Sprache.
+class CategoryTitle {
+  const CategoryTitle(this.name, this.language);
+
+  final String name;
+  final Language? language;
+
+  static final _yearOnly = RegExp(
+    r'^(filme?|movies?|vod|kino|cinema|serien|series|tv[\s-]?shows?)\s*[-–:|]?\s*((?:19|20)\d{2})$',
+    caseSensitive: false,
+  );
+
+  static CategoryTitle parse(String raw, {int? currentYear}) {
+    final parsed = ChannelName.parse(raw);
+    var name = parsed.title;
+    final language = Language.fromCode(parsed.country);
+    // „Filme - 2026“ → „Neuerscheinungen 2026“ (bzw. „Filme 2019“ für ältere Jahre).
+    final yearCategory = _yearOnly.firstMatch('$name${parsed.year != null ? ' ${parsed.year}' : ''}'.trim());
+    if (yearCategory != null) {
+      final year = int.parse(yearCategory.group(2)!);
+      final now = currentYear ?? DateTime.now().year;
+      final kind =
+          yearCategory.group(1)!.toLowerCase().startsWith('seri') ||
+              yearCategory.group(1)!.toLowerCase().startsWith('tv')
+          ? 'Serien'
+          : 'Filme';
+      name = year >= now - 1 ? 'Neuerscheinungen $year' : '$kind $year';
+    } else if (parsed.year != null) {
+      name = '$name ${parsed.year}';
+    }
+    return CategoryTitle(name, language);
+  }
 }
 
 extension ChannelNameX on Channel {
   ChannelName get display => ChannelName.of(this);
 
   bool get isSeparator => display.isSeparator;
+
+  /// Erscheinungsjahr aus dem Namen, z. B. 1991 aus „K2 - 1991“.
+  int? get releaseYear => display.year;
 }
