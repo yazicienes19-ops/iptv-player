@@ -39,6 +39,20 @@ class HomeView extends ConsumerWidget {
     final favoriteVod = favorites.where((c) => c.type != ContentType.live).toList();
     final liveRow = favoriteLive.isNotEmpty ? favoriteLive : live.take(20).toList();
 
+    // Ladefehler (z. B. Server abgelehnt) nicht als „keine Inhalte“ ausgeben.
+    final liveState = ref.watch(catalogProvider(ContentType.live));
+    final error = liveState.error ?? movies.error ?? series.error;
+    if (hero.isEmpty && liveRow.isEmpty && error != null) {
+      return AsyncStateView.error(
+        error: error,
+        onRetry: () {
+          ref.invalidate(m3uPlaylistProvider);
+          for (final type in ContentType.values) {
+            ref.invalidate(catalogProvider(type));
+          }
+        },
+      );
+    }
     if (hero.isEmpty && liveRow.isEmpty) {
       return const EmptyView(
         icon: Icons.tv_off_rounded,

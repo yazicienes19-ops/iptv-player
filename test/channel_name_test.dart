@@ -79,4 +79,17 @@ void main() {
     expect(CategoryTitle.parse('TV Serien').name, 'TV Serien');
     expect(CategoryTitle.parse('HD Kanäle').language, isNull);
   });
+
+  test('Kategorien mit Ländernamen und Marken', () {
+    expect(CategoryTitle.parse('✪ SWITZERLAND').language?.code, 'de');
+    expect(CategoryTitle.parse('✪ NEW ZEALAND').language?.code, 'en');
+    expect(CategoryTitle.parse('MAGENTA TV').language?.code, 'de');
+    expect(CategoryTitle.parse('✪ BLUE SPORT EVENTS').language?.code, 'de');
+    expect(CategoryTitle.parse('TÜRKIYE ULUSAL').language?.code, 'tr');
+    expect(CategoryTitle.parse('GREECE').language?.code, 'el');
+    expect(CategoryTitle.parse('✪ ALL PPV EVENT').language, isNull);
+    expect(CategoryTitle.parse('Sport Extra').language, isNull);
+    // Nur ganze Wörter: „turk“ steckt in „Turkmenistan“, zählt aber nicht.
+    expect(CategoryTitle.parse('Turkmenistan TV').language, isNull);
+  });
 }

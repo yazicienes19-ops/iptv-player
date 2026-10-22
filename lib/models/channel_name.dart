@@ -178,6 +178,8 @@ class CategoryTitle {
         name = rest.isEmpty ? candidate.label : rest;
       }
     }
+    // Ländernamen und eindeutige Marken: „✪ SWITZERLAND“, „MAGENTA TV“, „TÜRKIYE ULUSAL“.
+    language ??= Language.fromText(name);
     // „Filme - 2026“ → „Neuerscheinungen 2026“ (bzw. „Filme 2019“ für ältere Jahre).
     final yearCategory = _yearOnly.firstMatch('$name${parsed.year != null ? ' ${parsed.year}' : ''}'.trim());
     if (yearCategory != null) {
