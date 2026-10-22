@@ -200,43 +200,86 @@ class LanguageFilterNotifier extends Notifier<String?> {
 
 final languageFilterProvider = NotifierProvider<LanguageFilterNotifier, String?>(LanguageFilterNotifier.new);
 
+/// Ordnet jedem Eintrag eine Sprache zu, damit der Länderfilter streng greift.
+///
+/// Reihenfolge: eigenes Kürzel des Senders („DE: ZDF“) → Sprache der Kategorie →
+/// aus den Sendern der Kategorie geschlossen (mind. 60 % einer Sprache).
+class LanguageIndex {
+  const LanguageIndex(this.categoryLanguage, {required this.hasInfo});
+
+  static const minShare = 0.6;
+
+  /// Kategorie-ID → Sprachcode (ausdrücklich oder erschlossen).
+  final Map<String, String> categoryLanguage;
+
+  /// `false`, wenn die Playlist gar keine Länderangaben enthält.
+  final bool hasInfo;
+
+  String? of(Channel channel) =>
+      Language.fromCode(channel.display.country)?.code ?? categoryLanguage[channel.categoryId];
+
+  bool matches(Channel channel, String? filter) {
+    if (filter == null) return true;
+    final language = of(channel);
+    if (language != null) return language == filter;
+    // Trennzeilen ohne Kürzel bleiben; leere Abschnitte fallen beim Anzeigen ohnehin weg.
+    if (channel.isSeparator) return true;
+    // Ohne jede Länderangabe in der Playlist würde ein strenger Filter alles ausblenden.
+    return !hasInfo;
+  }
+
+  factory LanguageIndex.build(Catalog catalog) {
+    final languages = <String, String>{
+      for (final c in catalog.categories)
+        if (c.language != null) c.id: c.language!,
+    };
+    final tally = <String, Map<String, int>>{};
+    final totals = <String, int>{};
+    var channelInfo = false;
+    for (final channel in catalog.channels) {
+      if (channel.isSeparator) continue;
+      final id = channel.categoryId ?? '';
+      totals[id] = (totals[id] ?? 0) + 1;
+      final code = Language.fromCode(channel.display.country)?.code;
+      if (code == null) continue;
+      channelInfo = true;
+      final counts = tally.putIfAbsent(id, () => {});
+      counts[code] = (counts[code] ?? 0) + 1;
+    }
+    for (final MapEntry(key: id, value: counts) in tally.entries) {
+      if (languages.containsKey(id)) continue;
+      final top = counts.entries.reduce((a, b) => a.value >= b.value ? a : b);
+      if (top.value >= minShare * totals[id]!) languages[id] = top.key;
+    }
+    return LanguageIndex(languages, hasInfo: languages.isNotEmpty || channelInfo);
+  }
+}
+
+final languageIndexProvider = Provider.family<LanguageIndex, ContentType>((ref, type) {
+  final catalog = ref.watch(catalogProvider(type)).value;
+  return catalog == null ? const LanguageIndex({}, hasInfo: false) : LanguageIndex.build(catalog);
+});
+
 /// Sprachen, die in der Playlist tatsächlich vorkommen (nach Häufigkeit).
 final availableLanguagesProvider = Provider<List<Language>>((ref) {
   final counts = <String, int>{};
   for (final type in ContentType.values) {
-    for (final category in ref.watch(catalogProvider(type)).value?.categories ?? const <Category>[]) {
-      final code = category.language;
-      if (code != null) counts[code] = (counts[code] ?? 0) + 1;
+    for (final code in ref.watch(languageIndexProvider(type)).categoryLanguage.values) {
+      counts[code] = (counts[code] ?? 0) + 1;
     }
   }
   final codes = counts.keys.toList()..sort((a, b) => counts[b]!.compareTo(counts[a]!));
   return [for (final code in codes) ?Language.byCode(code)];
 });
 
-/// Kategorien ohne erkennbare Sprache gelten für jede Auswahl.
-bool _matchesLanguage(Category category, String? filter) =>
-    filter == null || category.language == null || category.language == filter;
-
-/// Kategorien einer Inhaltsart, gefiltert nach Sprache und ohne leere.
+/// Kategorien einer Inhaltsart, die nach dem Länderfilter noch Einträge haben.
 final filteredCategoriesProvider = Provider.family<List<Category>, ContentType>((ref, type) {
   final categories = ref.watch(catalogProvider(type)).value?.categories ?? const <Category>[];
-  final filter = ref.watch(languageFilterProvider);
   final counts = ref.watch(categoryCountsProvider(type));
   return [
     for (final c in categories)
-      if (_matchesLanguage(c, filter) && (counts[c.id] ?? 0) > 0) c,
+      if ((counts[c.id] ?? 0) > 0) c,
   ];
-});
-
-/// Kategorie-IDs, die der Sprachfilter durchlässt (für schnelle Abfragen).
-final _allowedCategoryIdsProvider = Provider.family<Set<String>?, ContentType>((ref, type) {
-  final filter = ref.watch(languageFilterProvider);
-  if (filter == null) return null;
-  final categories = ref.watch(catalogProvider(type)).value?.categories ?? const <Category>[];
-  return {
-    for (final c in categories)
-      if (_matchesLanguage(c, filter)) c.id,
-  };
 });
 
 /// Einträge nach Kategorie gruppiert, in Katalog-Reihenfolge (für die Reihen-Ansicht).
@@ -245,16 +288,16 @@ final channelsByCategoryProvider = Provider.family<AsyncValue<List<(Category, Li
   type,
 ) {
   final filter = ref.watch(languageFilterProvider);
+  final index = ref.watch(languageIndexProvider(type));
   return ref.watch(catalogProvider(type)).whenData((catalog) {
     final grouped = <String, List<Channel>>{};
     for (final channel in catalog.channels) {
-      if (channel.isSeparator) continue;
+      if (channel.isSeparator || !index.matches(channel, filter)) continue;
       grouped.putIfAbsent(channel.categoryId ?? '', () => []).add(channel);
     }
     return [
       for (final category in catalog.categories)
-        if (_matchesLanguage(category, filter) && grouped[category.id]?.isNotEmpty == true)
-          (category, grouped[category.id]!),
+        if (grouped[category.id]?.isNotEmpty == true) (category, grouped[category.id]!),
     ];
   });
 });
@@ -332,16 +375,15 @@ final visibleChannelsProvider = Provider.family<AsyncValue<List<Channel>>, Conte
   final section = AppSection.values.firstWhere((s) => s.contentType == type);
   final query = ref.watch(searchQueryProvider(section)).trim().toLowerCase();
   final keepSeparators = type == ContentType.live && query.isEmpty && !ref.watch(hideSeparatorsProvider);
-  final allowed = ref.watch(_allowedCategoryIdsProvider(type));
+  final filter = ref.watch(languageFilterProvider);
+  final index = ref.watch(languageIndexProvider(type));
 
   return catalog.whenData((c) {
     Iterable<Channel> result = c.channels;
     if (!keepSeparators) result = result.where((ch) => !ch.isSeparator);
-    if (category != null) {
-      result = result.where((ch) => ch.categoryId == category.id);
-    } else if (allowed != null) {
-      result = result.where((ch) => allowed.contains(ch.categoryId));
-    }
+    // Pro Sender prüfen: auch gemischte Kategorien zeigen nur das gewählte Land.
+    if (filter != null) result = result.where((ch) => index.matches(ch, filter));
+    if (category != null) result = result.where((ch) => ch.categoryId == category.id);
     if (query.isNotEmpty) result = result.where((ch) => ch.name.toLowerCase().contains(query));
     return result.toList();
   });
@@ -350,13 +392,14 @@ final visibleChannelsProvider = Provider.family<AsyncValue<List<Channel>>, Conte
 /// Anzahl echter Einträge (ohne Trennzeilen) je Kategorie-ID, Schlüssel `null` = alle.
 final categoryCountsProvider = Provider.family<Map<String?, int>, ContentType>((ref, type) {
   final channels = ref.watch(catalogProvider(type)).value?.channels ?? const <Channel>[];
-  final allowed = ref.watch(_allowedCategoryIdsProvider(type));
+  final filter = ref.watch(languageFilterProvider);
+  final index = ref.watch(languageIndexProvider(type));
   final counts = <String?, int>{null: 0};
   for (final channel in channels) {
-    if (channel.isSeparator) continue;
+    // Gezählt wird nur, was der Länderfilter zeigt.
+    if (channel.isSeparator || !index.matches(channel, filter)) continue;
     counts[channel.categoryId] = (counts[channel.categoryId] ?? 0) + 1;
-    // „Alle“ zählt nur, was der Sprachfilter zeigt.
-    if (allowed == null || allowed.contains(channel.categoryId)) counts[null] = counts[null]! + 1;
+    counts[null] = counts[null]! + 1;
   }
   return counts;
 });
