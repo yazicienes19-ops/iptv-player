@@ -14,7 +14,7 @@ import '../../providers/app_providers.dart';
 import '../theme.dart';
 import '../widgets/channel_views.dart';
 import '../widgets/common.dart';
-import '../widgets/media_image.dart';
+import '../widgets/logo_image.dart';
 import '../widgets/now_playing_panel.dart';
 import '../widgets/tv_focus.dart';
 
@@ -519,11 +519,11 @@ class _ChannelGridTileState extends ConsumerState<ChannelGridTile> {
                       child: Stack(
                         fit: StackFit.expand,
                         children: [
-                          MediaImage(
+                          LogoImage(
                             url: channel.logo,
-                            fit: BoxFit.contain,
+                            name: name.title,
                             padding: const EdgeInsets.all(20),
-                            placeholder: Monogram(name: name.title, size: 72),
+                            monogramSize: 72,
                           ),
                           if (name.qualities.isNotEmpty)
                             Positioned(top: 8, right: 8, child: QualityBadge(tag: name.qualities.first)),

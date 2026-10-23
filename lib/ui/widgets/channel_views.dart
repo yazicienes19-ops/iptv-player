@@ -9,7 +9,7 @@ import '../../player/player_controller.dart';
 import '../../providers/app_providers.dart';
 import '../detail/detail_page.dart';
 import '../theme.dart';
-import 'media_image.dart';
+import 'logo_image.dart';
 import 'tv_focus.dart';
 
 /// Live-Sender laufen sofort im eingebetteten Player, Filme und Serien
@@ -472,7 +472,6 @@ class LogoTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final dpr = MediaQuery.devicePixelRatioOf(context);
     final radius = BorderRadius.circular(size * 0.24);
     return Container(
       width: size,
@@ -484,12 +483,11 @@ class LogoTile extends StatelessWidget {
       ),
       child: ClipRRect(
         borderRadius: radius,
-        child: MediaImage(
+        child: LogoImage(
           url: channel.logo,
-          fit: BoxFit.contain,
-          cacheWidth: (size * dpr).round(),
+          name: channel.display.title,
           padding: const EdgeInsets.all(6),
-          placeholder: Monogram(name: channel.display.title, size: size),
+          monogramSize: size,
         ),
       ),
     );
@@ -596,12 +594,7 @@ class _LiveCardState extends ConsumerState<LiveCard> {
                     ),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(9),
-                      child: MediaImage(
-                        url: widget.channel.logo,
-                        fit: BoxFit.contain,
-                        padding: const EdgeInsets.all(22),
-                        placeholder: Monogram(name: name.title, size: 64),
-                      ),
+                      child: LogoImage(url: widget.channel.logo, name: name.title, padding: const EdgeInsets.all(22)),
                     ),
                   ),
                 ),

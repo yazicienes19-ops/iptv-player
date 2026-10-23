@@ -1,0 +1,13 @@
+{
+  "id": "com.enesyazici.ipflix",
+  "version": "1.0.0",
+  "vendor": "Enes Yazici",
+  "type": "web",
+  "main": "index.html",
+  "title": "IpFlix",
+  "icon": "icon.png",
+  "largeIcon": "largeIcon.png",
+  "bgColor": "#0B0B0F",
+  "resolution": "1920x1080",
+  "disableBackHistoryAPI": true
+}

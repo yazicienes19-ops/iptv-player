@@ -154,6 +154,7 @@ class XtreamApi {
       backdrop: backdrops is List && backdrops.isNotEmpty ? _text(backdrops.first) : _text(backdrops),
       cast: _text(info['cast'] ?? info['actors']),
       seasons: seasons,
+      tmdbId: int.tryParse('${info['tmdb_id'] ?? info['tmdb'] ?? ''}'),
     );
   }
 

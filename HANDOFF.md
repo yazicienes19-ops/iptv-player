@@ -24,6 +24,29 @@ Ende-zu-Ende-Test mit echten Streams (öffnet Fenster, ca. 3 Min.):
 `python3 integration_test/test_server.py &` und dann
 `flutter test integration_test/app_flow_test.dart -d macos`.
 
+## LG-Fernseher (webOS)
+
+`./scripts/build_webos.sh` baut `dist/com.enesyazici.ipflix_1.0.0_all.ipk`
+(braucht `npm install -g @webos-tools/cli`). Flutter-Web-Build mit
+`--dart-define=WEBOS=true --dart-define=FORCE_TV=true`.
+
+Aufbau: Die Startschale `webos/app/index.html` weckt per Luna den JS-Dienst
+`webos/service/proxy.js`. Der liefert die App unter `http://127.0.0.1:47823/` aus
+und leitet unter `/p?u=…&ua=…` alle Anfragen (API, M3U, Logos, Video) mit dem
+getarnten User-Agent weiter, weil der Browser fremde Server sonst per CORS sperrt
+und der Anbieter fremde User-Agents ablehnt. HLS-Listen schreibt der Dienst um, damit
+auch Segmente und Tonspuren durch ihn laufen; abspielen tut der Fernseher selbst
+(eigenes HLS, kein hls.js). Die App pingt `/ping` jede Minute, sonst beendet sich der
+Dienst nach 5 Min. Im Browser entfallen: libmpv-Optionen (`lib/player/mpv/`),
+HLS-Umgehung, VPN-Erkennung/Kill-Switch, Datei-Import, Stream-Info-Werte.
+Zurück-Taste (461) wird in `web/index.html` zu Escape. Lokal testen:
+`node build/webos/service/proxy.js`, dann `http://127.0.0.1:47823/` öffnen.
+
+Installation: LG-Entwicklerkonto, App „Developer Mode“ am TV, dann
+`ares-setup-device` (IP + Passphrase) und `ares-install -d tv dist/*.ipk`.
+Entwicklermodus läuft nach 50 h ab und muss in der App verlängert werden.
+Noch nie auf echtem TV getestet: Luna-Start, Port-Freigabe, alte Node-Versionen.
+
 ## Aufbau (Einstieg)
 
 | Bereich | Datei |

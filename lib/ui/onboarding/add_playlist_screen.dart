@@ -1,4 +1,5 @@
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -41,7 +42,10 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
   }
 
   Future<void> _pickFile() async {
-    final files = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: ['m3u', 'm3u8', 'txt']);
+    final files = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['m3u', 'm3u8', 'txt'],
+    );
     final file = files.singleOrNull;
     if (file?.path == null) return;
     setState(() {
@@ -65,7 +69,8 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
 
     final id = DateTime.now().microsecondsSinceEpoch.toString();
     final fallbackName = switch (_kind) {
-      PlaylistKind.xtream => Uri.tryParse(_server.text.trim())?.host ?? 'Xtream',
+      PlaylistKind.xtream =>
+        Uri.tryParse(_server.text.trim())?.host ?? 'Xtream',
       PlaylistKind.m3uUrl => 'M3U Playlist',
       PlaylistKind.m3uFile => _pickedFileName ?? 'Lokale Playlist',
     };
@@ -83,12 +88,25 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
             username: _username.text.trim(),
             password: _password.text,
           );
-          await XtreamApi(playlist, dio: ref.read(httpClientProvider)).authenticate();
+          await XtreamApi(
+            playlist,
+            dio: ref.read(httpClientProvider),
+          ).authenticate();
         case PlaylistKind.m3uUrl:
-          playlist = PlaylistCredentials(id: id, name: name, kind: _kind, m3uUrl: _m3uUrl.text.trim());
+          playlist = PlaylistCredentials(
+            id: id,
+            name: name,
+            kind: _kind,
+            m3uUrl: _m3uUrl.text.trim(),
+          );
         case PlaylistKind.m3uFile:
           final path = await PlaylistLoader.importFile(_pickedFilePath!, id);
-          playlist = PlaylistCredentials(id: id, name: name, kind: _kind, localFilePath: path);
+          playlist = PlaylistCredentials(
+            id: id,
+            name: name,
+            kind: _kind,
+            localFilePath: path,
+          );
       }
 
       await ref.read(playlistsProvider.notifier).add(playlist);
@@ -104,7 +122,9 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
     return Scaffold(
-      appBar: widget.isOnboarding ? null : AppBar(title: const Text('Playlist hinzufügen')),
+      appBar: widget.isOnboarding
+          ? null
+          : AppBar(title: const Text('Playlist hinzufügen')),
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -117,14 +137,24 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     if (widget.isOnboarding) ...[
-                      const Icon(Icons.live_tv_rounded, size: 56, color: AppColors.accent),
+                      const Icon(
+                        Icons.live_tv_rounded,
+                        size: 56,
+                        color: AppColors.accent,
+                      ),
                       const SizedBox(height: 16),
-                      Text('Willkommen', textAlign: TextAlign.center, style: textTheme.headlineMedium),
+                      Text(
+                        'Willkommen',
+                        textAlign: TextAlign.center,
+                        style: textTheme.headlineMedium,
+                      ),
                       const SizedBox(height: 8),
                       Text(
                         'Füge deine erste Playlist hinzu, um loszulegen.',
                         textAlign: TextAlign.center,
-                        style: textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
+                        style: textTheme.bodyMedium?.copyWith(
+                          color: AppColors.textSecondary,
+                        ),
                       ),
                       const SizedBox(height: 32),
                     ],
@@ -135,30 +165,58 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
                           label: Text('Xtream'),
                           icon: Icon(Icons.dns_outlined),
                         ),
-                        ButtonSegment(value: PlaylistKind.m3uUrl, label: Text('M3U URL'), icon: Icon(Icons.link)),
-                        ButtonSegment(value: PlaylistKind.m3uFile, label: Text('Datei'), icon: Icon(Icons.folder_open)),
+                        ButtonSegment(
+                          value: PlaylistKind.m3uUrl,
+                          label: Text('M3U URL'),
+                          icon: Icon(Icons.link),
+                        ),
+                        // Im Browser gibt es keinen Dateipfad zum Kopieren.
+                        if (!kIsWeb)
+                          ButtonSegment(
+                            value: PlaylistKind.m3uFile,
+                            label: Text('Datei'),
+                            icon: Icon(Icons.folder_open),
+                          ),
                       ],
                       selected: {_kind},
-                      onSelectionChanged: _busy ? null : (s) => setState(() => _kind = s.first),
+                      onSelectionChanged: _busy
+                          ? null
+                          : (s) => setState(() => _kind = s.first),
                     ),
                     const SizedBox(height: 24),
                     TextFormField(
                       controller: _name,
-                      decoration: const InputDecoration(labelText: 'Name (optional)'),
+                      decoration: const InputDecoration(
+                        labelText: 'Name (optional)',
+                      ),
                     ),
                     const SizedBox(height: 12),
                     ..._fieldsForKind(),
                     if (_error != null) ...[
                       const SizedBox(height: 16),
-                      Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                      Text(
+                        _error!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
                     ],
                     const SizedBox(height: 24),
                     FilledButton(
                       onPressed: _busy ? null : _submit,
-                      style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size.fromHeight(48),
+                      ),
                       child: _busy
-                          ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                          : Text(_kind == PlaylistKind.xtream ? 'Anmelden' : 'Hinzufügen'),
+                          ? const SizedBox.square(
+                              dimension: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Text(
+                              _kind == PlaylistKind.xtream
+                                  ? 'Anmelden'
+                                  : 'Hinzufügen',
+                            ),
                     ),
                   ],
                 ),
@@ -171,7 +229,8 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
   }
 
   List<Widget> _fieldsForKind() {
-    String? required(String? v) => (v == null || v.trim().isEmpty) ? 'Pflichtfeld' : null;
+    String? required(String? v) =>
+        (v == null || v.trim().isEmpty) ? 'Pflichtfeld' : null;
 
     return switch (_kind) {
       PlaylistKind.xtream => [
@@ -179,7 +238,10 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
           controller: _server,
           keyboardType: TextInputType.url,
           autocorrect: false,
-          decoration: const InputDecoration(labelText: 'Server-URL', hintText: 'http://example.com:8080'),
+          decoration: const InputDecoration(
+            labelText: 'Server-URL',
+            hintText: 'http://example.com:8080',
+          ),
           validator: required,
         ),
         const SizedBox(height: 12),
@@ -203,10 +265,15 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
           controller: _m3uUrl,
           keyboardType: TextInputType.url,
           autocorrect: false,
-          decoration: const InputDecoration(labelText: 'M3U-URL', hintText: 'http://…/playlist.m3u'),
+          decoration: const InputDecoration(
+            labelText: 'M3U-URL',
+            hintText: 'http://…/playlist.m3u',
+          ),
           validator: (v) {
             final uri = Uri.tryParse(v?.trim() ?? '');
-            return uri == null || !uri.hasScheme || uri.host.isEmpty ? 'Gültige URL eingeben' : null;
+            return uri == null || !uri.hasScheme || uri.host.isEmpty
+                ? 'Gültige URL eingeben'
+                : null;
           },
         ),
       ],
@@ -215,7 +282,9 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
           onPressed: _busy ? null : _pickFile,
           icon: const Icon(Icons.upload_file),
           label: Text(_pickedFileName ?? 'M3U-Datei auswählen'),
-          style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size.fromHeight(48),
+          ),
         ),
       ],
     };

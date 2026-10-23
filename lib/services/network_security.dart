@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+
 /// Ergebnis der VPN-Erkennung.
 class VpnStatus {
   const VpnStatus({required this.active, this.interfaceName});
@@ -42,6 +44,8 @@ class NetworkSecurityService {
   );
 
   Future<VpnStatus> detect() async {
+    // Im Browser sind die Netzwerk-Interfaces nicht sichtbar.
+    if (kIsWeb) return VpnStatus.unknown;
     try {
       // includeLinkLocal: false blendet fe80::/169.254.x.x bereits aus.
       final interfaces = await NetworkInterface.list(includeLoopback: false, includeLinkLocal: false);
@@ -87,7 +91,7 @@ class NetworkGuard {
   /// Prüft frisch statt aus einem Zwischenstand, damit ein gerade
   /// abgebrochenes VPN sofort auffällt.
   Future<void> ensureAllowed() async {
-    if (!killSwitch) return;
+    if (!killSwitch || kIsWeb) return;
     if (!(await service.detect()).active) throw const KillSwitchException();
   }
 }

@@ -1,0 +1,10 @@
+{
+  "id": "com.enesyazici.ipflix.proxy",
+  "description": "IpFlix Hilfsdienst",
+  "services": [
+    {
+      "name": "com.enesyazici.ipflix.proxy",
+      "description": "Liefert IpFlix aus und leitet Anfragen weiter"
+    }
+  ]
+}

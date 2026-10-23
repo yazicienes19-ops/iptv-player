@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../providers/app_providers.dart';
+import '../../services/webos.dart';
 
 import '../theme.dart';
 
@@ -31,9 +32,10 @@ class MediaImage extends ConsumerWidget {
     final fallback = placeholder ?? const ColoredBox(color: AppColors.surfaceHigh);
     // Kill-Switch ohne VPN: auch Logos und Poster nicht laden.
     if (url == null || ref.watch(networkBlockedProvider)) return fallback;
+    final userAgent = ref.watch(userAgentProvider);
     return Image.network(
-      url!,
-      headers: {'User-Agent': ref.watch(userAgentProvider)},
+      proxiedUrl(url!, userAgent: userAgent),
+      headers: {'User-Agent': userAgent},
       fit: fit,
       cacheWidth: cacheWidth,
       // Der Fehler-Platzhalter läuft nicht durch frameBuilder, bleibt also ungepolstert.

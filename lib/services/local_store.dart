@@ -130,6 +130,14 @@ class LocalStore {
     await _prefs.remove(_recentsKey(playlistId));
   }
 
+  static const _tmdbKey = 'tmdb.apiKey';
+
+  /// TMDB-Schlüssel; wie Zugangsdaten nur im Schlüsselbund.
+  Future<String?> readTmdbKey() => _secure.read(_tmdbKey);
+
+  Future<void> writeTmdbKey(String? key) =>
+      key == null || key.trim().isEmpty ? _secure.delete(_tmdbKey) : _secure.write(_tmdbKey, key.trim());
+
   /// Panik-Knopf: entfernt Playlists, Favoriten, Einstellungen und Schlüsselbund.
   Future<void> wipe() async {
     _playlists = [];

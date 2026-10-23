@@ -44,6 +44,7 @@ class MediaDetails {
     this.backdrop,
     this.cast,
     this.seasons = const [],
+    this.tmdbId,
   });
 
   static const empty = MediaDetails();
@@ -56,6 +57,9 @@ class MediaDetails {
   final String? backdrop;
   final String? cast;
   final List<Season> seasons;
+
+  /// Viele Xtream-Anbieter liefern die TMDB-Nummer mit; dann ist die Zuordnung eindeutig.
+  final int? tmdbId;
 
   /// Kurze Metazeile wie „2024 · Drama · 1 Std. 52 Min.“
   List<String> get metaParts => [?year, ?genre, ?duration];

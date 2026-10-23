@@ -92,4 +92,14 @@ void main() {
     // Nur ganze Wörter: „turk“ steckt in „Turkmenistan“, zählt aber nicht.
     expect(CategoryTitle.parse('Turkmenistan TV').language, isNull);
   });
+
+  test('Hochgestellte Qualitätsangaben', () {
+    final a = ChannelName.parse('TRT 1 ᴴᴰ');
+    expect(a.title, 'TRT 1');
+    expect(a.qualities, [QualityTag.hd]);
+    expect(ChannelName.parse('ATV ᵁᴴᴰ').qualities, [QualityTag.uhd]);
+    expect(ChannelName.parse('ATV ᵁᴴᴰ').title, 'ATV');
+    expect(ChannelName.parse('Kanal D ᶠᴴᴰ').qualities, [QualityTag.fhd]);
+    expect(ChannelName.parse('360 ᴴᴰ').title, '360');
+  });
 }

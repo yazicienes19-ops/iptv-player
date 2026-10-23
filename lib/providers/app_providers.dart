@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -9,12 +10,14 @@ import '../models/channel_name.dart';
 import '../models/content_type.dart';
 import '../models/epg_item.dart';
 import '../models/language.dart';
+import '../models/tmdb.dart';
 import '../models/playlist_credentials.dart';
 import '../services/app_settings.dart';
 import '../services/http_client.dart';
 import '../services/local_store.dart';
 import '../services/m3u_parser.dart';
 import '../services/network_security.dart';
+import '../services/tmdb_api.dart';
 import '../services/playlist_loader.dart';
 import '../services/xtream_api.dart';
 
@@ -64,7 +67,8 @@ final networkGuardProvider = Provider<NetworkGuard>(
 /// `true`, wenn der Kill-Switch gerade jede Verbindung sperrt.
 final networkBlockedProvider = Provider<bool>((ref) {
   final killSwitch = ref.watch(settingsProvider.select((s) => s.killSwitch));
-  if (!killSwitch) return false;
+  // Im Browser lässt sich kein VPN erkennen; der Kill-Switch gilt dort nicht.
+  if (!killSwitch || kIsWeb) return false;
   return !(ref.watch(vpnStatusProvider).value?.active ?? false);
 });
 
@@ -154,10 +158,46 @@ final m3uPlaylistProvider = FutureProvider<M3uPlaylist?>((ref) async {
 
 final catalogProvider = FutureProvider.family<Catalog, ContentType>((ref, type) async {
   final api = ref.watch(xtreamApiProvider);
-  if (api != null) return api.getCatalog(type);
-  final m3u = await ref.watch(m3uPlaylistProvider.future);
-  return m3u?[type] ?? Catalog.empty;
+  final Catalog catalog;
+  if (api != null) {
+    catalog = await api.getCatalog(type);
+  } else {
+    final m3u = await ref.watch(m3uPlaylistProvider.future);
+    catalog = m3u?[type] ?? Catalog.empty;
+  }
+  return type == ContentType.live ? borrowMissingLogos(catalog) : catalog;
 });
+
+/// Sender ohne Logo übernehmen das Logo einer anderen Fassung mit gleichem
+/// Namen („TRT 1“ bekommt das Logo von „TRT 1 HD“).
+Catalog borrowMissingLogos(Catalog catalog) {
+  String key(Channel c) => c.display.title.toLowerCase().replaceAll(RegExp(r'[^a-z0-9äöüçğışş]+'), '');
+  final logos = <String, String>{};
+  for (final c in catalog.channels) {
+    if (c.logo != null && !c.isSeparator) logos.putIfAbsent(key(c), () => c.logo!);
+  }
+  if (logos.isEmpty) return catalog;
+  return Catalog(
+    categories: catalog.categories,
+    seriesSeasons: catalog.seriesSeasons,
+    channels: [
+      for (final c in catalog.channels)
+        if (c.logo != null || c.isSeparator || logos[key(c)] == null)
+          c
+        else
+          Channel(
+            id: c.id,
+            name: c.name,
+            streamUrl: c.streamUrl,
+            type: c.type,
+            logo: logos[key(c)],
+            categoryId: c.categoryId,
+            epgChannelId: c.epgChannelId,
+            xtreamStreamId: c.xtreamStreamId,
+          ),
+    ],
+  );
+}
 
 /// Detailinfos für Filme und Serien (bei Serien inklusive Staffeln).
 final mediaDetailsProvider = FutureProvider.family<MediaDetails, Channel>((ref, channel) async {
@@ -584,4 +624,94 @@ final shortEpgProvider = FutureProvider.autoDispose.family<List<EpgItem>, Channe
   final streamId = channel.xtreamStreamId;
   if (api == null || streamId == null || channel.type != ContentType.live) return const [];
   return api.getShortEpg(streamId);
+});
+
+// ---------------------------------------------------------------------------
+// TMDB (Film-, Serien- und Darstellerinfos)
+// ---------------------------------------------------------------------------
+
+class TmdbKeyNotifier extends AsyncNotifier<String?> {
+  @override
+  Future<String?> build() => ref.watch(localStoreProvider).readTmdbKey();
+
+  /// Prüft den Schlüssel bei TMDB und speichert ihn erst dann. Wirft bei Fehler.
+  Future<void> save(String key) async {
+    final trimmed = key.trim();
+    await TmdbApi(trimmed, dio: ref.read(httpClientProvider)).verify();
+    await ref.read(localStoreProvider).writeTmdbKey(trimmed);
+    state = AsyncData(trimmed);
+  }
+
+  Future<void> remove() async {
+    await ref.read(localStoreProvider).writeTmdbKey(null);
+    state = const AsyncData(null);
+  }
+}
+
+final tmdbKeyProvider = AsyncNotifierProvider<TmdbKeyNotifier, String?>(TmdbKeyNotifier.new);
+
+final tmdbApiProvider = Provider<TmdbApi?>((ref) {
+  final key = ref.watch(tmdbKeyProvider).value;
+  return key == null || key.isEmpty ? null : TmdbApi(key, dio: ref.watch(httpClientProvider));
+});
+
+/// Ordnet einen Playlist-Eintrag TMDB zu: zuerst über die vom Anbieter
+/// gelieferte TMDB-Nummer, sonst per Suche nach bereinigtem Titel und Jahr.
+final tmdbMatchProvider = FutureProvider.family<TmdbRef?, Channel>((ref, channel) async {
+  final api = ref.watch(tmdbApiProvider);
+  if (api == null || channel.type == ContentType.live) return null;
+  final type = channel.type == ContentType.series ? TmdbMediaType.tv : TmdbMediaType.movie;
+  final known = (await ref.watch(mediaDetailsProvider(channel).future)).tmdbId;
+  if (known != null && known > 0) return TmdbRef(id: known, type: type, title: channel.display.title);
+  return api.search(channel.display.title, type, year: channel.releaseYear);
+});
+
+final tmdbTitleProvider = FutureProvider.family<TmdbTitle?, Channel>((ref, channel) async {
+  final match = await ref.watch(tmdbMatchProvider(channel).future);
+  final api = ref.watch(tmdbApiProvider);
+  if (match == null || api == null) return null;
+  return api.title(match.id, match.type);
+});
+
+final tmdbCollectionProvider = FutureProvider.family<TmdbCollection, int>((ref, id) async {
+  final api = ref.watch(tmdbApiProvider);
+  if (api == null) throw const TmdbException('Kein TMDB-Schlüssel hinterlegt.');
+  return api.collection(id);
+});
+
+final tmdbPersonProvider = FutureProvider.family<TmdbPerson, int>((ref, id) async {
+  final api = ref.watch(tmdbApiProvider);
+  if (api == null) throw const TmdbException('Kein TMDB-Schlüssel hinterlegt.');
+  return api.person(id);
+});
+
+/// Sucht zu einem TMDB-Titel den passenden Eintrag in der Playlist.
+class PlaylistTitleIndex {
+  PlaylistTitleIndex(Iterable<Channel> channels) {
+    for (final channel in channels) {
+      if (channel.isSeparator) continue;
+      _byTitle.putIfAbsent(normalizeTitle(channel.display.title), () => []).add(channel);
+    }
+  }
+
+  final _byTitle = <String, List<Channel>>{};
+
+  /// Gleicher (Original-)Titel, passende Art; Jahr darf um 1 abweichen.
+  Channel? find(TmdbRef ref) {
+    final wantedType = ref.type == TmdbMediaType.tv ? ContentType.series : ContentType.movie;
+    for (final title in {ref.title, ?ref.originalTitle}) {
+      final candidates = (_byTitle[normalizeTitle(title)] ?? const <Channel>[]).where((c) => c.type == wantedType);
+      for (final c in candidates) {
+        final year = c.releaseYear;
+        if (year == null || ref.year == null || (year - ref.year!).abs() <= 1) return c;
+      }
+    }
+    return null;
+  }
+}
+
+final playlistTitleIndexProvider = Provider<PlaylistTitleIndex>((ref) {
+  final movies = ref.watch(catalogProvider(ContentType.movie)).value?.channels ?? const <Channel>[];
+  final series = ref.watch(catalogProvider(ContentType.series)).value?.channels ?? const <Channel>[];
+  return PlaylistTitleIndex([...movies, ...series]);
 });

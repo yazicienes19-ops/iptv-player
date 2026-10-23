@@ -11,6 +11,7 @@ import '../../player/player_controller.dart';
 import '../../providers/app_providers.dart';
 import '../theme.dart';
 import 'channel_views.dart';
+import '../../player/mpv/mpv_bridge.dart';
 
 String _time(DateTime t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
@@ -369,12 +370,11 @@ class _StreamInfoCardState extends State<_StreamInfoCard> {
   }
 
   Future<void> _refresh() async {
-    final platform = widget.player.platform;
-    if (platform is! NativePlayer) return;
     final values = <String, String>{};
     for (final p in _properties) {
       try {
-        values[p] = await platform.getProperty(p);
+        final value = await mpvGetProperty(widget.player, p);
+        if (value != null) values[p] = value;
       } catch (_) {
         // Eigenschaft gerade nicht verfügbar (z. B. vor dem ersten Bild).
       }

@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:isolate';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
+
 import '../models/catalog.dart';
 import '../models/category.dart';
 import '../models/channel.dart';
@@ -22,6 +24,8 @@ class M3uParser {
   /// 50-MB-Listen die Oberfläche nicht blockieren. `Isolate.run` gibt das
   /// Ergebnis per `Isolate.exit` zurück, also ohne teure Kopie.
   static Future<M3uPlaylist> parseInBackground(Uint8List bytes) {
+    // Im Browser gibt es keine Isolates; dort wird direkt geparst.
+    if (kIsWeb) return Future(() => parse(utf8.decode(bytes, allowMalformed: true)));
     return Isolate.run(() => parse(utf8.decode(bytes, allowMalformed: true)));
   }
 

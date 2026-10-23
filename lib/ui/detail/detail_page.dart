@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../models/catalog.dart';
 import '../../models/channel.dart';
@@ -11,6 +12,7 @@ import '../browse/poster_card.dart';
 import '../theme.dart';
 import '../widgets/channel_views.dart';
 import '../widgets/glass.dart';
+import 'tmdb_widgets.dart';
 import '../widgets/media_image.dart';
 import '../widgets/tv_focus.dart';
 
@@ -54,12 +56,24 @@ class _DetailPageState extends ConsumerState<DetailPage> {
         .toList();
 
     final name = channel.display;
-    final year = name.year ?? int.tryParse(details.year ?? '');
+    final hasTmdbKey = ref.watch(tmdbApiProvider) != null;
+    final tmdbAsync = ref.watch(tmdbTitleProvider(channel));
+    final tmdb = tmdbAsync.value;
+    final year = name.year ?? int.tryParse(details.year ?? '') ?? tmdb?.year;
+    final rating = (tmdb?.rating ?? 0) > 0 ? tmdb!.rating : details.rating;
+    // Deutsche TMDB-Handlung vor der des Anbieters (oft englisch), englische TMDB-Handlung zuletzt.
+    final germanOverview = tmdb != null && tmdb.overviewIsGerman ? tmdb.overview : null;
+    final plot = germanOverview ?? details.plot ?? tmdb?.overview;
+    final backdrop = details.backdrop ?? tmdb?.backdrop;
+    final poster = channel.logo ?? tmdb?.poster;
     final meta = [
-      ?details.genre,
-      ?details.duration,
-      if (details.rating != null && details.rating! > 0) '★ ${details.rating!.toStringAsFixed(1)}',
-    ];
+      details.genre ?? (tmdb != null && tmdb.genres.isNotEmpty ? tmdb.genres.take(3).join(', ') : null),
+      details.duration ?? tmdb?.runtimeLabel,
+      if (rating != null && rating > 0) '★ ${rating.toStringAsFixed(1)}${tmdb?.rating == rating ? ' TMDB' : ''}',
+    ].nonNulls.toList();
+    // TMDB-Empfehlungen, die in der Playlist stecken; sonst dieselbe Kategorie.
+    final recommended = tmdb == null ? const <Channel>[] : availableRecommendations(ref, tmdb.recommendations);
+    final moreLikeThis = recommended.length >= 3 ? recommended.where((c) => c != channel).take(20).toList() : similar;
 
     void play() {
       if (isSeries) {
@@ -82,13 +96,22 @@ class _DetailPageState extends ConsumerState<DetailPage> {
             letterSpacing: -0.5,
           ),
         ),
+        if (tmdb?.tagline != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            tmdb!.tagline!,
+            style: const TextStyle(fontStyle: FontStyle.italic, color: AppColors.textSecondary, fontSize: 15),
+          ),
+        ],
         const SizedBox(height: 12),
         Wrap(
           spacing: 8,
           runSpacing: 6,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            if (year != null) MetaBadge(text: '$year'),
+            if (year != null)
+              MetaBadge(text: tmdb?.endYear != null && tmdb!.endYear != year ? '$year–${tmdb.endYear}' : '$year'),
+            if (tmdb?.certification != null) MetaBadge(text: tmdb!.certification!, filled: false),
             for (final q in name.qualities.take(2)) QualityBadge(tag: q),
             if (isSeries && seasons.isNotEmpty) MetaBadge(text: seasonSummary(seasons), filled: false),
           ],
@@ -125,16 +148,48 @@ class _DetailPageState extends ConsumerState<DetailPage> {
               icon: Icon(isFavorite ? Icons.check_rounded : Icons.add_rounded),
               label: Text(isFavorite ? 'In meiner Liste' : 'Meine Liste'),
             ),
+            if (tmdb?.trailerYoutubeKey != null)
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  minimumSize: Size(compact ? double.infinity : 0, 48),
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  side: const BorderSide(color: Color(0x66FFFFFF)),
+                ),
+                // Öffnet YouTube im Browser bzw. in der YouTube-App.
+                onPressed: () => launchUrl(
+                  Uri.parse('https://www.youtube.com/watch?v=${tmdb!.trailerYoutubeKey}'),
+                  mode: LaunchMode.externalApplication,
+                ),
+                icon: const Icon(Icons.smart_display_rounded),
+                label: const Text('Trailer'),
+              ),
           ],
         ),
-        if (details.plot != null) ...[
+        if (plot != null) ...[
           const SizedBox(height: 20),
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 640),
-            child: Text(details.plot!, style: const TextStyle(height: 1.5, color: Color(0xFFD0D3D9))),
+            child: Text(plot, style: const TextStyle(height: 1.5, color: Color(0xFFD0D3D9))),
           ),
         ],
-        if (details.cast != null) ...[
+        if (tmdb != null && tmdb.directors.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(
+                  text: isSeries ? 'Idee: ' : 'Regie: ',
+                  style: const TextStyle(color: AppColors.textSecondary),
+                ),
+                TextSpan(text: tmdb.directors.take(3).join(', ')),
+              ],
+            ),
+            style: const TextStyle(fontSize: 13),
+          ),
+        ],
+        // Ohne TMDB-Darsteller wenigstens die Besetzung des Anbieters als Text.
+        if (details.cast != null && (tmdb == null || tmdb.cast.isEmpty)) ...[
           const SizedBox(height: 12),
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 640),
@@ -178,7 +233,7 @@ class _DetailPageState extends ConsumerState<DetailPage> {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  BackdropImage(backdrop: details.backdrop, poster: channel.logo),
+                  BackdropImage(backdrop: backdrop, poster: poster),
                   const DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
@@ -207,7 +262,7 @@ class _DetailPageState extends ConsumerState<DetailPage> {
                               child: AspectRatio(
                                 aspectRatio: PosterCard.aspectRatio,
                                 child: MediaImage(
-                                  url: channel.logo,
+                                  url: poster,
                                   placeholder: TitlePlaceholder(
                                     title: channel.display.title,
                                     year: channel.display.year,
@@ -233,7 +288,7 @@ class _DetailPageState extends ConsumerState<DetailPage> {
                             child: AspectRatio(
                               aspectRatio: PosterCard.aspectRatio,
                               child: MediaImage(
-                                url: channel.logo,
+                                url: poster,
                                 placeholder: TitlePlaceholder(
                                   title: channel.display.title,
                                   year: channel.display.year,
@@ -325,7 +380,34 @@ class _DetailPageState extends ConsumerState<DetailPage> {
               ),
             ),
           ],
-          if (similar.isNotEmpty) ...[
+          // TMDB: Darsteller, Reihe – oder ein Hinweis, wie man sie bekommt.
+          if (!hasTmdbKey)
+            SliverToBoxAdapter(
+              child: Padding(padding: EdgeInsets.fromLTRB(hPad, 28, hPad, 0), child: const TmdbHintCard()),
+            ),
+          if (tmdb != null && tmdb.cast.isNotEmpty) ...[
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(hPad, 32, hPad, 8),
+                child: TmdbSectionTitle(isSeries ? 'Besetzung' : 'Darsteller'),
+              ),
+            ),
+            SliverToBoxAdapter(
+              child: CastRow(cast: tmdb.cast, horizontalPadding: hPad),
+            ),
+          ],
+          if (tmdb?.collectionId != null)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(hPad, 28, hPad, 0),
+                child: CollectionBanner(id: tmdb!.collectionId!, name: tmdb.collectionName ?? 'Filmreihe'),
+              ),
+            ),
+          if (hasTmdbKey && tmdbAsync.isLoading)
+            const SliverToBoxAdapter(
+              child: Padding(padding: EdgeInsets.all(24), child: LinearProgressIndicator()),
+            ),
+          if (moreLikeThis.isNotEmpty) ...[
             SliverToBoxAdapter(
               child: Padding(
                 padding: EdgeInsets.fromLTRB(hPad, 32, hPad, 4),
@@ -339,13 +421,13 @@ class _DetailPageState extends ConsumerState<DetailPage> {
                   scrollDirection: Axis.horizontal,
                   clipBehavior: Clip.none,
                   padding: EdgeInsets.symmetric(horizontal: hPad, vertical: 6),
-                  itemCount: similar.length,
+                  itemCount: moreLikeThis.length,
                   separatorBuilder: (_, _) => const SizedBox(width: 12),
                   itemBuilder: (context, i) => PosterCard(
-                    channel: similar[i],
-                    queue: similar,
+                    channel: moreLikeThis[i],
+                    queue: moreLikeThis,
                     width: compact ? 112 : 150,
-                    onTap: () => Navigator.of(context).pushReplacement(DetailPage.route(similar[i], similar)),
+                    onTap: () => Navigator.of(context).pushReplacement(DetailPage.route(moreLikeThis[i], moreLikeThis)),
                   ),
                 ),
               ),

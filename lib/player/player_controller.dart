@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
@@ -10,7 +11,9 @@ import '../models/content_type.dart';
 import '../providers/app_providers.dart';
 import '../services/http_client.dart';
 import '../services/network_security.dart';
+import '../services/webos.dart';
 import 'hls_resolver.dart';
+import 'mpv/mpv_bridge.dart';
 
 /// Bildformat-Umschalter: Original, Zoom (beschneiden), Strecken.
 enum VideoFit {
@@ -212,7 +215,11 @@ class PlayerController extends Notifier<PlaybackState> {
       // Getarnter User-Agent auch für libmpv (gilt für Video- und angehängte Tonspuren).
       await _setMpvOption('user-agent', ref.read(userAgentProvider));
       if (session != _session) return;
-      final stream = await _hlsResolver.resolve(channel.streamUrl, ref.read(httpClientProvider));
+      // Im Browser spielt der Fernseher HLS selbst ab, samt separater Tonspuren.
+      // Auf webOS läuft der Stream über den Hilfsdienst, damit der getarnte User-Agent gilt.
+      final stream = kIsWeb
+          ? ResolvedStream(proxiedUrl(channel.streamUrl, userAgent: ref.read(userAgentProvider)))
+          : await _hlsResolver.resolve(channel.streamUrl, ref.read(httpClientProvider));
       if (session != _session) return;
       // stop() setzt Breite und Position zurück, damit alte Werte nicht als Start zählen.
       await player.stop();
@@ -224,7 +231,7 @@ class PlayerController extends Notifier<PlaybackState> {
       }
       for (final (i, audio) in stream.audio.indexed) {
         if (session != _session) return;
-        await (player.platform as NativePlayer).command([
+        await mpvCommand(player, [
           'audio-add',
           audio.url,
           i == 0 ? 'select' : 'auto',
@@ -254,10 +261,7 @@ class PlayerController extends Notifier<PlaybackState> {
     );
   }
 
-  Future<void> _setMpvOption(String name, String value) async {
-    final platform = player.platform;
-    if (platform is NativePlayer) await platform.setProperty(name, value);
-  }
+  Future<void> _setMpvOption(String name, String value) => mpvSetProperty(player, name, value);
 
   void _markStarted() {
     if (!_acceptStartEvents || (!state.isLoading && !state.hasError)) return;

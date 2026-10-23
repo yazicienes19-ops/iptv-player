@@ -62,8 +62,7 @@ class SecureStore {
     }
   }
 
-  Future<void> write(String key, String value) async =>
-      (await _backend()).write(key: '$_prefix$key', value: value);
+  Future<void> write(String key, String value) async => (await _backend()).write(key: '$_prefix$key', value: value);
 
   Future<void> delete(String key) async {
     final storage = await _backend();

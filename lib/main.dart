@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,6 +14,7 @@ import 'providers/app_providers.dart';
 import 'services/device.dart';
 import 'services/local_store.dart';
 import 'services/secure_store.dart';
+import 'services/webos.dart';
 import 'ui/home/home_shell.dart';
 import 'ui/onboarding/add_playlist_screen.dart';
 import 'ui/theme.dart';
@@ -22,7 +26,11 @@ Future<void> main() async {
   if (kReleaseMode) debugPrint = (String? message, {int? wrapWidth}) {};
   final prefs = await SharedPreferences.getInstance();
   final store = await LocalStore.open(prefs, SecureStore());
-  final isTelevision = await detectTelevision();
+  final isTelevision = isWebOs || await detectTelevision();
+  if (isWebOs) {
+    final ping = Dio();
+    Timer.periodic(const Duration(minutes: 1), (_) => ping.get<void>(webOsPingUrl).ignore());
+  }
 
   runApp(
     ProviderScope(

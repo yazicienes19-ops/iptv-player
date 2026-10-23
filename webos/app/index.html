@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>IpFlix</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0B0B0F; color: #F2F2F7; font-family: sans-serif; }
+    body { display: flex; align-items: center; justify-content: center; font-size: 32px; }
+  </style>
+</head>
+<body>
+  <div id="status">IpFlix startet …</div>
+  <script>
+    // Startschale: weckt den Hilfsdienst (webos/service/proxy.js) und wechselt
+    // dann auf die App, die er unter 127.0.0.1 ausliefert. Nur ES5, damit es
+    // auch auf älteren Fernsehern läuft.
+    var PORT = 47823;
+    var APP_URL = 'http://127.0.0.1:' + PORT + '/';
+    var status = document.getElementById('status');
+    var bridge;
+
+    function fail(text) {
+      status.textContent = 'IpFlix konnte nicht starten: ' + text;
+    }
+
+    function waitForProxy(attempt) {
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', APP_URL + 'ping');
+      xhr.timeout = 1000;
+      xhr.onload = function () { location.replace(APP_URL); };
+      xhr.onerror = xhr.ontimeout = function () {
+        if (attempt >= 40) return fail('Der Hilfsdienst antwortet nicht.');
+        setTimeout(function () { waitForProxy(attempt + 1); }, 250);
+      };
+      xhr.send();
+    }
+
+    if (!window.PalmServiceBridge) {
+      fail('Diese Seite läuft nur auf einem LG-Fernseher.');
+    } else {
+      bridge = new PalmServiceBridge();
+      bridge.onservicecallback = function (message) {
+        var response = JSON.parse(message);
+        if (response.returnValue) waitForProxy(0);
+        else fail(response.errorText || 'Unbekannter Fehler im Hilfsdienst.');
+      };
+      bridge.call('luna://com.enesyazici.ipflix.proxy/start', '{}');
+    }
+  </script>
+</body>
+</html>

@@ -83,8 +83,80 @@ class ChannelName {
     'RAW': QualityTag.raw,
   };
 
+  /// Hoch- und tiefgestellte Zeichen, mit denen Anbieter Qualitäten schreiben („ᴴᴰ“, „ᵁᴴᴰ“, „⁴ᴷ“).
+  static const _superscripts = {
+    'ᴬ': 'A',
+    'ᴮ': 'B',
+    'ᴰ': 'D',
+    'ᴱ': 'E',
+    'ᴳ': 'G',
+    'ᴴ': 'H',
+    'ᴵ': 'I',
+    'ᴶ': 'J',
+    'ᴷ': 'K',
+    'ᴸ': 'L',
+    'ᴹ': 'M',
+    'ᴺ': 'N',
+    'ᴼ': 'O',
+    'ᴾ': 'P',
+    'ᴿ': 'R',
+    'ᵀ': 'T',
+    'ᵁ': 'U',
+    'ⱽ': 'V',
+    'ᵂ': 'W',
+    'ᶠ': 'F',
+    'ˢ': 'S',
+    'ᶜ': 'C',
+    'ʰ': 'H',
+    'ᵈ': 'D',
+    'ᵏ': 'K',
+    'ᵛ': 'V',
+    'ᵉ': 'E',
+    'ᵖ': 'P',
+    'ᵗ': 'T',
+    'ᵘ': 'U',
+    '⁰': '0',
+    '¹': '1',
+    '²': '2',
+    '³': '3',
+    '⁴': '4',
+    '⁵': '5',
+    '⁶': '6',
+    '⁷': '7',
+    '⁸': '8',
+    '⁹': '9',
+    '₀': '0',
+    '₁': '1',
+    '₂': '2',
+    '₃': '3',
+    '₄': '4',
+  };
+
+  /// Hochgestellte Folgen werden zu einem eigenen Wort: „TRT 1 ᴴᴰ“ → „TRT 1 HD“.
+  static final _anySuperscript = RegExp('[\u00B2\u00B3\u00B9\u02B0-\u02FF\u1D2C-\u1DBF\u2070-\u209F\u2C7D]');
+
+  static String _normalizeSuperscripts(String text) {
+    // Schneller Ausstieg: Fast alle Namen enthalten keine solchen Zeichen.
+    if (!_anySuperscript.hasMatch(text)) return text;
+    final out = StringBuffer();
+    var inRun = false;
+    for (final char in text.runes.map(String.fromCharCode)) {
+      final plain = _superscripts[char];
+      if (plain != null) {
+        if (!inRun) out.write(' ');
+        out.write(plain);
+        inRun = true;
+      } else {
+        if (inRun && char.trim().isNotEmpty) out.write(' ');
+        out.write(char);
+        inRun = false;
+      }
+    }
+    return out.toString();
+  }
+
   static ChannelName parse(String raw) {
-    var text = raw.trim();
+    var text = _normalizeSuperscripts(raw).trim();
 
     String? country;
     // Manche Anbieter stapeln Präfixe („(V|DE) DE: …“), daher bis zu zweimal.

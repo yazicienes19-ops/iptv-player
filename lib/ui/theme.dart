@@ -12,6 +12,9 @@ abstract final class AppColors {
 
   /// Dunkler Grund für Senderlogos (mit feinem Rand, damit auch dunkle Logos Kontur haben).
   static const logoSurface = Color(0xFF1E222D);
+
+  /// Heller Grund für dunkle Logos, die auf [logoSurface] verschwinden würden.
+  static const logoLight = Color(0xFFE6E8EC);
 }
 
 ThemeData buildAppTheme() {
