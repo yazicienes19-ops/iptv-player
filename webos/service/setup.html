@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>IpFlix einrichten</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #0a0c10;
+      color: #f2f3f5;
+      font-family: -apple-system, system-ui, sans-serif;
+      padding: 32px 20px;
+    }
+    main { max-width: 420px; margin: 0 auto; }
+    h1 { color: #e50914; font-size: 32px; margin: 0 0 4px; }
+    p { color: #9aa0ac; margin: 0 0 24px; font-size: 16px; }
+    .tabs { display: flex; background: #15171d; border-radius: 12px; padding: 4px; margin-bottom: 20px; }
+    .tabs label { flex: 1; text-align: center; padding: 10px; border-radius: 9px; font-weight: 600; color: #9aa0ac; }
+    .tabs input { display: none; }
+    .tabs input:checked + span { color: #f2f3f5; }
+    .tabs label:has(input:checked) { background: #2a2e38; }
+    .field { display: block; margin-bottom: 14px; }
+    .field span { display: block; font-size: 14px; color: #9aa0ac; margin-bottom: 6px; }
+    .field input {
+      width: 100%;
+      padding: 14px;
+      font-size: 17px;
+      border-radius: 10px;
+      border: 1px solid #2a2e38;
+      background: #15171d;
+      color: #f2f3f5;
+    }
+    .field input:focus { outline: none; border-color: #f2f3f5; }
+    button {
+      width: 100%;
+      margin-top: 10px;
+      padding: 16px;
+      font-size: 17px;
+      font-weight: 700;
+      border: 0;
+      border-radius: 12px;
+      background: #e50914;
+      color: #fff;
+    }
+    .hidden { display: none; }
+    .hint { font-size: 13px; margin: -6px 0 8px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>IpFlix</h1>
+    <p>Gib deinen IPTV-Zugang ein. Der Fernseher meldet sich danach von selbst an.</p>
+    <form method="post" autocomplete="off">
+      <div class="tabs">
+        <label><input type="radio" name="type" value="xtream" checked><span>Xtream</span></label>
+        <label><input type="radio" name="type" value="m3u"><span>M3U-Adresse</span></label>
+      </div>
+      <div id="xtream">
+        <label class="field"><span>Server-URL</span>
+          <input name="server" type="url" inputmode="url" placeholder="http://anbieter.tv:8080" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+        <label class="field"><span>Benutzername</span>
+          <input name="username" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+        <label class="field"><span>Passwort</span>
+          <input name="password" type="password"></label>
+      </div>
+      <div id="m3u" class="hidden">
+        <label class="field"><span>M3U-Adresse</span>
+          <input name="url" type="url" inputmode="url" placeholder="http://…" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+      </div>
+      <label class="field" id="tmdb"><span>TMDB-Schlüssel (optional, für Darsteller und Empfehlungen)</span>
+        <input name="tmdbKey" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="API-Schlüssel oder Lesetoken"></label>
+      <p class="hint">Kostenlos auf themoviedb.org unter Einstellungen → API. Derselbe Schlüssel wie in der Mac-App geht auch.</p>
+      <button type="submit">An den Fernseher senden</button>
+    </form>
+  </main>
+  <script>
+    // ?nur=tmdb: nur den TMDB-Schlüssel abfragen (aus den Einstellungen am Fernseher).
+    if (location.search.indexOf('nur=tmdb') >= 0) {
+      document.querySelector('.tabs').innerHTML = '<input type="hidden" name="type" value="tmdb">';
+      document.querySelector('.tabs').className = 'hidden-tabs';
+      document.getElementById('xtream').className = 'hidden';
+      document.querySelector('main > p').textContent = 'Gib deinen TMDB-Schlüssel ein. Der Fernseher übernimmt ihn sofort.';
+      document.querySelector('#tmdb span').textContent = 'TMDB-Schlüssel';
+    }
+    var radios = document.querySelectorAll('input[name=type]');
+    for (var i = 0; i < radios.length; i++) {
+      radios[i].addEventListener('change', function (e) {
+        var m3u = e.target.value === 'm3u';
+        document.getElementById('xtream').classList.toggle('hidden', m3u);
+        document.getElementById('m3u').classList.toggle('hidden', !m3u);
+      });
+    }
+  </script>
+</body>
+</html>

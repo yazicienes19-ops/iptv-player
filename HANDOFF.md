@@ -26,26 +26,46 @@ Ende-zu-Ende-Test mit echten Streams (öffnet Fenster, ca. 3 Min.):
 
 ## LG-Fernseher (webOS)
 
-`./scripts/build_webos.sh` baut `dist/com.enesyazici.ipflix_1.0.0_all.ipk`
-(braucht `npm install -g @webos-tools/cli`). Flutter-Web-Build mit
-`--dart-define=WEBOS=true --dart-define=FORCE_TV=true`.
+Gerät des Nutzers: LG 65UM7100 (2019), webOS 4.10, **Chrome 53, kein WebAssembly** →
+Flutter läuft dort nicht. Deshalb eigene TV-Oberfläche in reinem JavaScript:
+`webos/tv/` (ES2015 ohne async/await, kein CSS-Grid/`gap`; Check mit acorn ecmaVersion 2016).
+Gleiche Funktionen wie die App im Kern: Xtream + M3U, Live mit Kategorien/Raster/EPG,
+Filme/Serien mit Details, Staffeln, Weiterschauen, Favoriten (Rot), Suche, Länderfilter,
+User-Agent-Wahl (Standard IPTV Smarters), Live-Format m3u8/ts.
 
-Aufbau: Die Startschale `webos/app/index.html` weckt per Luna den JS-Dienst
-`webos/service/proxy.js`. Der liefert die App unter `http://127.0.0.1:47823/` aus
-und leitet unter `/p?u=…&ua=…` alle Anfragen (API, M3U, Logos, Video) mit dem
-getarnten User-Agent weiter, weil der Browser fremde Server sonst per CORS sperrt
-und der Anbieter fremde User-Agents ablehnt. HLS-Listen schreibt der Dienst um, damit
-auch Segmente und Tonspuren durch ihn laufen; abspielen tut der Fernseher selbst
-(eigenes HLS, kein hls.js). Die App pingt `/ping` jede Minute, sonst beendet sich der
-Dienst nach 5 Min. Im Browser entfallen: libmpv-Optionen (`lib/player/mpv/`),
-HLS-Umgehung, VPN-Erkennung/Kill-Switch, Datei-Import, Stream-Info-Werte.
-Zurück-Taste (461) wird in `web/index.html` zu Escape. Lokal testen:
-`node build/webos/service/proxy.js`, dann `http://127.0.0.1:47823/` öffnen.
+Paket: `./scripts/build_webos.sh` → `dist/com.enesyazici.ipflix_1.0.0_all.ipk` (~180 KB).
+Startschale `webos/app` weckt per Luna den JS-Dienst `webos/service/proxy.js` (Node 0.12!),
+der `webos/tv` unter `http://127.0.0.1:47823/` ausliefert und unter `/p?u=…&ua=…` alles
+(API, Logos, Video) mit User-Agent durchreicht; HLS-Listen werden umgeschrieben.
+`cacert.pem` (aus /etc/ssl/cert.pem) liegt bei, weil das TV-Node alte Stammzertifikate hat.
+Gemessen über den Dienst: HTTP ~28 Mbit/s, HTTPS nur ~4 Mbit/s (TLS im alten Node) →
+HD über HTTPS ruckelt. Direkt laden kann der TV-Abspieler HTTPS auch nicht (Zertifikate).
 
-Installation: LG-Entwicklerkonto, App „Developer Mode“ am TV, dann
-`ares-setup-device` (IP + Passphrase) und `ares-install -d tv dist/*.ipk`.
-Entwicklermodus läuft nach 50 h ab und muss in der App verlängert werden.
-Noch nie auf echtem TV getestet: Luna-Start, Port-Freigabe, alte Node-Versionen.
+Login per Handy: Login-Bildschirm holt `/setup/start` → `webos/service/setup.js` öffnet
+`http://<tv-ip>:47824/<zufallscode>` im WLAN (nur dieser Pfad, eine Eingabe, max. 15 Min.,
+schließt beim Verlassen des Logins). TV zeigt QR (`webos/tv/js/vendor/qrcode.js`, MIT) und
+fragt `/setup/poll` alle 2 s ab. Falsche Daten → neuer QR-Code. Port 47823 bleibt nur lokal.
+
+TMDB (`webos/tv/js/tmdb.js`): Schlüssel kommt per Handy (beim Login optional oder
+Einstellungen → TMDB, `/setup/start-tmdb` → Handy-Seite `?nur=tmdb`), wird geprüft und in
+localStorage gespeichert. Detailseite: bereinigter Titel, Tagline, FSK, TMDB-Bewertung,
+Darsteller (→ Personenseite mit Titeln aus der Playlist), Filmreihe (fehlende Teile blass),
+„Mehr wie dieses“ nur mit vorhandenen Titeln (Abgleich wie PlaylistTitleIndex in Dart).
+Testbar ohne Schlüssel: mock_xtream.py beantwortet auch /3/… (fetch im TV per CDP umbiegen).
+
+Auf dem TV geprüft (23.10.): HLS und TS live, Senderwechsel, MP4 und MKV, Springen, Pause,
+nächste Folge automatisch, EPG, Suche, Favoriten, Einstellungen, Länderfilter, Beenden.
+
+Testen ohne Anbieter: `MOCK_MEDIA=http://<mac-ip>:8768 python3 webos/dev/mock_xtream.py`
+(Login test/test, Port 8766) plus ein Dateiserver mit hls/index.m3u8, live.ts, film.mp4/mkv.
+Fernsteuern über DevTools des TV: `ares-inspect -d tv -a com.enesyazici.ipflix`, dann
+`http://192.168.178.26:9998/json` (Tasten per CDP Input.dispatchKeyEvent, 461 = Zurück).
+Video erscheint nicht in Screenshots (eigene Bildebene des TV).
+
+TV eingerichtet: `ares-setup-device` Name `tv`, 192.168.178.26, Schlüssel ~/.ssh/tv_webos.
+Entwicklermodus läuft nach 50 h ab und muss in der Developer-Mode-App verlängert werden.
+Die Flutter-Web-Anpassungen (`lib/services/webos.dart`, `lib/player/mpv/`) bleiben für
+neuere Fernseher/Browser, werden aber nicht mehr gepackt.
 
 ## Aufbau (Einstieg)
 

@@ -3,7 +3,7 @@
 // Der Browser auf dem Fernseher sperrt Anfragen an fremde Server (CORS), und
 // IPTV-Anbieter erlauben sie fast nie. Dieser Dienst läuft auf dem Fernseher
 // selbst und erledigt deshalb zwei Dinge unter http://127.0.0.1:47823:
-//   /        liefert die Flutter-App aus www/ aus (gleicher Ursprung wie /p)
+//   /        liefert die Oberfläche aus www/ aus (webos/tv, gleicher Ursprung wie /p)
 //   /p?u=…   holt eine fremde Adresse (API, M3U, Logos, Video) und reicht sie
 //            mit dem gewählten User-Agent durch; HLS-Listen werden so
 //            umgeschrieben, dass auch Segmente und Tonspuren hier durchlaufen.
@@ -17,6 +17,7 @@ var url = require('url');
 var fs = require('fs');
 var path = require('path');
 var zlib = require('zlib');
+var setup = require('./setup');
 
 var PORT = 47823;
 var HOST = '127.0.0.1';
@@ -25,6 +26,19 @@ var MAX_REDIRECTS = 5;
 var UPSTREAM_TIMEOUT_MS = 30000;
 // Ohne Lebenszeichen der App (alle 60 s) beendet sich der Dienst.
 var IDLE_MS = 5 * 60 * 1000;
+
+// Ältere Fernseher bringen veraltete Stammzertifikate mit (HTTPS scheitert mit
+// „self signed certificate in certificate chain“). Deshalb liegt eine aktuelle
+// Liste bei (cacert.pem, aus scripts/build_webos.sh).
+var CA = loadCertificates(path.join(__dirname, 'cacert.pem'));
+
+function loadCertificates(file) {
+  try {
+    return fs.readFileSync(file, 'utf8').match(/-----BEGIN CERTIFICATE-----[\s\S]+?-----END CERTIFICATE-----/g) || undefined;
+  } catch (e) {
+    return undefined;
+  }
+}
 
 var MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -67,7 +81,10 @@ function isPlaylist(address, contentType) {
   return /mpegurl/i.test(contentType || '') || /\.m3u8(\?|$)/i.test(url.parse(address).pathname || '');
 }
 
-// Alle Adressen einer HLS-Liste (Zeilen und URI="…") absolut machen und über /p leiten.
+// Alle Adressen einer HLS-Liste (Zeilen und URI="…") absolut machen und über /p
+// leiten. Direkt kann der Abspieler des Fernsehers HTTPS nicht laden (veraltete
+// Zertifikate). Über HTTPS schafft das alte Node allerdings nur etwa 4 Mbit/s,
+// über HTTP rund 28 Mbit/s.
 function rewritePlaylist(text, base, ua) {
   return text.split(/\r?\n/).map(function (line) {
     var trimmed = line.trim();
@@ -105,11 +122,14 @@ function proxy(req, res, query) {
   var headers = { 'Accept': req.headers.accept || '*/*', 'Accept-Encoding': 'gzip' };
   if (query.ua) headers['User-Agent'] = query.ua;
   if (req.headers.range) headers['Range'] = req.headers.range;
+  // TMDB-Lesetoken (v4) kommt als Bearer-Kopf.
+  if (req.headers.authorization) headers['Authorization'] = req.headers.authorization;
 
   function fetch(address, redirects) {
     var options = url.parse(address);
     options.method = req.method;
     options.headers = headers;
+    if (CA && options.protocol === 'https:') options.ca = CA;
     var client = options.protocol === 'https:' ? https : http;
     var upstream = client.request(options, function (response) {
       var location = response.headers.location;
@@ -153,8 +173,8 @@ function serveFile(req, res, pathname) {
     res.writeHead(200, {
       'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream',
       'Content-Length': stat.size,
-      // index.html nie zwischenspeichern, damit Updates sofort greifen.
-      'Cache-Control': relative === 'index.html' ? 'no-cache' : 'max-age=3600'
+      // Nie zwischenspeichern, damit ein Update sofort greift (liegt ja lokal).
+      'Cache-Control': 'no-cache'
     });
     if (req.method === 'HEAD') return res.end();
     fs.createReadStream(file).pipe(res);
@@ -169,7 +189,29 @@ function handle(req, res) {
     return res.end();
   }
   if (parsed.pathname === '/p') return proxy(req, res, parsed.query);
+  if (parsed.pathname.indexOf('/setup/') === 0) return handleSetup(parsed.pathname, res);
   serveFile(req, res, parsed.pathname);
+}
+
+// Nur über 127.0.0.1 erreichbar: Der Login-Bildschirm öffnet, fragt ab und schließt
+// die Handy-Eingabeseite (setup.js).
+function handleSetup(pathname, res) {
+  function json(status, data) {
+    res.writeHead(status, cors({ 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }));
+    res.end(JSON.stringify(data));
+  }
+  if (pathname === '/setup/start' || pathname === '/setup/start-tmdb') {
+    return setup.start(pathname === '/setup/start-tmdb' ? 'tmdb' : 'login', function (err, address) {
+      if (err) json(503, { error: err.message });
+      else json(200, { url: address });
+    });
+  }
+  if (pathname === '/setup/poll') return json(200, { account: setup.poll() });
+  if (pathname === '/setup/stop') {
+    setup.stop();
+    return json(200, {});
+  }
+  sendError(res, 404, 'Nicht gefunden');
 }
 
 // Startet den Server einmal; weitere Aufrufe warten nur auf ihn.
