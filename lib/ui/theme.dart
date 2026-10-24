@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 
 abstract final class AppColors {
-  static const background = Color(0xFF0A0C10);
-  static const surface = Color(0xFF15171D);
-  static const surfaceHigh = Color(0xFF1E2129);
-  static const border = Color(0xFF2A2E38);
-  static const accent = Color(0xFFE50914);
-  static const textPrimary = Color(0xFFF2F3F5);
-  static const textSecondary = Color(0xFF9AA0AC);
+  static const background = Color(0xFF090B10);
+  static const surface = Color(0xFF141820);
+  static const surfaceHigh = Color(0xFF1C222D);
+  static const border = Color(0xFF2A3240);
+  static const accent = Color(0xFFF04B56);
+  static const textPrimary = Color(0xFFF5F6F8);
+  static const textSecondary = Color(0xFFA8B0BF);
   static const live = Color(0xFFFF453A);
 
   /// Dunkler Grund für Senderlogos (mit feinem Rand, damit auch dunkle Logos Kontur haben).
@@ -23,6 +23,11 @@ ThemeData buildAppTheme() {
     brightness: Brightness.dark,
     primary: AppColors.accent,
     surface: AppColors.surface,
+    onSurface: AppColors.textPrimary,
+  );
+  final textTheme = ThemeData.dark().textTheme.apply(
+    bodyColor: AppColors.textPrimary,
+    displayColor: AppColors.textPrimary,
   );
   return ThemeData(
     useMaterial3: true,
@@ -30,6 +35,19 @@ ThemeData buildAppTheme() {
     scaffoldBackgroundColor: AppColors.background,
     canvasColor: AppColors.background,
     dividerColor: AppColors.border,
+    textTheme: textTheme.copyWith(
+      titleLarge: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700, letterSpacing: -0.4),
+      titleMedium: textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600, letterSpacing: -0.15),
+      bodyMedium: textTheme.bodyMedium?.copyWith(height: 1.45),
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        minimumSize: const Size(48, 48),
+        foregroundColor: AppColors.background,
+        textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    ),
     appBarTheme: const AppBarTheme(
       backgroundColor: AppColors.background,
       surfaceTintColor: Colors.transparent,
@@ -44,9 +62,17 @@ ThemeData buildAppTheme() {
       filled: true,
       fillColor: AppColors.surfaceHigh,
       isDense: true,
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: AppColors.border),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: AppColors.border),
+      ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: AppColors.accent),
       ),
     ),

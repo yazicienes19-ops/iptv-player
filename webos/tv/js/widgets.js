@@ -11,6 +11,18 @@
     return parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
   }
 
+  // Nur so weit scrollen, dass der fokussierte Eintrag ganz sichtbar bleibt.
+  // Zeigerbewegungen dürfen die vom Nutzer gewählte Scrollposition nicht ändern.
+  App.revealIn = function (container, node) {
+    if (!container || !node) return;
+    const area = container.getBoundingClientRect();
+    const item = node.getBoundingClientRect();
+    const top = area.top + 12;
+    const bottom = area.bottom - 12;
+    if (item.top < top || item.height > bottom - top) container.scrollTop += item.top - top;
+    else if (item.bottom > bottom) container.scrollTop += item.bottom - bottom;
+  };
+
   // ---------- Senkrechte Liste ----------
 
   function VList(options) {
@@ -21,6 +33,7 @@
     this.active = false;
     this.nodes = [];
     this.el.addEventListener('wheel', (e) => {
+      if (this.options.scrollContainer) return;
       this.el.scrollTop += e.deltaY;
       e.preventDefault();
     });
@@ -33,11 +46,17 @@
     this.nodes = items.map((item, i) => {
       const node = this.options.render(item, i);
       node.classList.add('vitem');
-      node.addEventListener('mouseover', () => {
+      node.addEventListener('mousemove', () => {
+        if (App.usingKeyboard || (this.active && this.index === i)) return;
         if (this.options.onPointer) this.options.onPointer();
         this.focusIndex(i, true);
       });
-      node.addEventListener('click', () => this.activate());
+      node.addEventListener('click', () => {
+        App.usingKeyboard = false;
+        if (this.options.onPointer) this.options.onPointer();
+        this.focusIndex(i, true);
+        this.activate();
+      });
       this.el.appendChild(node);
       return node;
     });
@@ -48,9 +67,9 @@
     return this.items[this.index];
   };
 
-  VList.prototype.setActive = function (active) {
+  VList.prototype.setActive = function (active, fromPointer) {
     this.active = active;
-    this.refresh(false);
+    this.refresh(active && !fromPointer);
   };
 
   VList.prototype.focusIndex = function (index, fromPointer) {
@@ -69,8 +88,11 @@
     });
     const node = this.nodes[this.index];
     if (node && scroll !== false) {
-      const target = node.offsetTop - (this.el.clientHeight - node.offsetHeight) / 2;
-      this.el.scrollTop = Math.max(0, target);
+      if (this.options.scrollContainer) App.revealIn(this.options.scrollContainer(), node);
+      else {
+        const target = node.offsetTop - (this.el.clientHeight - node.offsetHeight) / 2;
+        this.el.scrollTop = Math.max(0, target);
+      }
     }
   };
 
@@ -168,11 +190,13 @@
       if (!node) {
         node = this.options.tile(this.items[i]);
         node.classList.add('tile');
-        node.style.width = m.w + 'px';
-        node.style.height = m.h + 'px';
         this.bindPointer(node, i);
         this.inner.appendChild(node);
       }
+      // Versteckte Bereiche messen zunächst 0 px. Beim Einblenden und nach
+      // einer Fensteränderung auch bereits vorhandene Kacheln neu bemessen.
+      node.style.width = m.w + 'px';
+      node.style.height = m.h + 'px';
       const col = i % m.cols;
       const row = Math.floor(i / m.cols) - this.top;
       node.style.transform = 'translate(' + col * (m.w + m.gap) + 'px,' + row * (m.h + m.gap) + 'px)';
@@ -187,7 +211,8 @@
   };
 
   Grid.prototype.bindPointer = function (node, i) {
-    node.addEventListener('mouseover', () => {
+    node.addEventListener('mousemove', () => {
+      if (App.usingKeyboard || (this.active && this.index === i)) return;
       if (this.options.onPointer) this.options.onPointer();
       if (i !== this.index) {
         this.index = i;
@@ -195,7 +220,12 @@
         if (this.options.onFocus) this.options.onFocus(this.current(), i);
       }
     });
-    node.addEventListener('click', () => this.activate());
+    node.addEventListener('click', () => {
+      App.usingKeyboard = false;
+      if (this.options.onPointer) this.options.onPointer();
+      this.focusIndex(i);
+      this.activate();
+    });
   };
 
   Grid.prototype.focusIndex = function (index) {
@@ -245,43 +275,50 @@
     App.clear(this.el);
     this.nodes = items.map((item, i) => {
       const node = this.options.render(item, i);
-      node.addEventListener('mouseover', () => {
+      node.addEventListener('mousemove', () => {
+        if (App.usingKeyboard || (this.active && this.index === i)) return;
         if (this.options.onPointer) this.options.onPointer();
-        this.focusIndex(i);
+        this.focusIndex(i, true);
       });
-      node.addEventListener('click', () => this.activate());
+      node.addEventListener('click', () => {
+        App.usingKeyboard = false;
+        if (this.options.onPointer) this.options.onPointer();
+        this.focusIndex(i, true);
+        this.activate();
+      });
       this.el.appendChild(node);
       return node;
     });
-    this.refresh();
+    this.refresh(false);
   };
 
   Row.prototype.current = function () {
     return this.items[this.index];
   };
 
-  Row.prototype.setActive = function (active) {
+  Row.prototype.setActive = function (active, fromPointer) {
     this.active = active;
-    this.refresh();
+    this.refresh(active && !fromPointer);
   };
 
-  Row.prototype.focusIndex = function (index) {
+  Row.prototype.focusIndex = function (index, fromPointer) {
     const changed = index !== this.index;
     this.index = Math.max(0, Math.min(index, this.items.length - 1));
-    this.refresh();
+    this.refresh(!fromPointer);
     if (changed && this.options.onFocus) this.options.onFocus(this.current(), this.index);
   };
 
-  Row.prototype.refresh = function () {
+  Row.prototype.refresh = function (scroll) {
     this.nodes.forEach((node, i) => {
       node.classList.toggle('focused', this.active && i === this.index);
       node.classList.toggle('selected', i === this.index);
     });
     // Nur waagerecht mitscrollen; senkrecht kümmert sich die Seite.
     const node = this.nodes[this.index];
-    if (node && this.el.scrollWidth > this.el.clientWidth) {
+    if (node && scroll !== false && this.el.scrollWidth > this.el.clientWidth) {
       this.el.scrollLeft = Math.max(0, node.offsetLeft - (this.el.clientWidth - node.offsetWidth) / 2);
     }
+    if (node && scroll !== false && this.options.scrollContainer) App.revealIn(this.options.scrollContainer(), node);
   };
 
   Row.prototype.activate = function () {
@@ -310,12 +347,12 @@
     return zone;
   };
 
-  Zones.prototype.activate = function (zone) {
+  Zones.prototype.activate = function (zone, fromPointer) {
     if (!zone || zone === this.active) return;
     if (this.active) this.active.setActive(false);
     this.active = zone;
-    zone.setActive(true);
-    if (this.onChange) this.onChange(zone);
+    zone.setActive(true, fromPointer);
+    if (this.onChange) this.onChange(zone, fromPointer);
   };
 
   Zones.prototype.onKey = function (key) {
@@ -360,6 +397,7 @@
       h('div.poster', null, [h('span.mono', { text: App.monogram(item.name) }), item.logo ? App.image(item.logo, 'poster-img') : null]),
       h('div.name', { text: App.displayTitle(item) }),
       favorite ? h('div.fav-dot') : null,
+      item.imdb ? h('div.imdb-badge', { text: 'IMDb ' + Number(item.imdb.rating).toFixed(1) }) : null,
       progress ? h('div.progress', null, [h('div.bar', { style: 'width:' + Math.round(progress * 100) + '%' })]) : null,
     ]);
   };

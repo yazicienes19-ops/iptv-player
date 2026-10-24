@@ -63,6 +63,31 @@ var IpFlix = (window.IpFlix = {});
 
   // ---------- Netz ----------
 
+  let setupSession = null;
+
+  // Nur die eigene Oberfläche erhält die Fähigkeit zum Starten/Abholen
+  // der Handy-Anmeldung. Fremde Seiten können diese Header nicht per CORS senden.
+  App.setupRequest = function (pathname) {
+    if (!setupSession) {
+      setupSession = fetch('/session', { headers: { 'X-IpFlix-Client': 'tv' } })
+        .then((r) => {
+          if (!r.ok) throw new Error('Lokale Anmeldung nicht verfügbar.');
+          return r.json();
+        })
+        .then((data) => {
+          if (!data.token) throw new Error('Lokale Anmeldung nicht verfügbar.');
+          return data.token;
+        });
+      setupSession.catch(() => (setupSession = null));
+    }
+    return setupSession
+      .then((token) => fetch(pathname, { headers: { 'X-IpFlix-Token': token } }))
+      .then((r) => {
+        if (!r.ok) throw new Error('Lokale Anmeldung nicht verfügbar.');
+        return r.json();
+      });
+  };
+
   /// Leitet über den Hilfsdienst (webos/service/proxy.js) mit getarntem User-Agent.
   App.proxied = function (url) {
     if (!url || !/^https?:\/\//i.test(url)) return url || '';
@@ -118,6 +143,9 @@ var IpFlix = (window.IpFlix = {});
 
   const KEYS = {
     13: 'ok',
+    32: 'space',
+    70: 'fullscreen',
+    77: 'mute',
     37: 'left',
     38: 'up',
     39: 'right',
@@ -207,11 +235,14 @@ var IpFlix = (window.IpFlix = {});
   };
 
   const ICONS = {
+    home: '<path d="M3 11l9-8 9 8M5 10v11h5v-7h4v7h5V10"/>',
     search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/>',
     live: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M8 21h8M9 2l3 4 3-4"/>',
     movie: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/>',
     series: '<rect x="6" y="3" width="15" height="12" rx="2"/><path d="M3 7v12a2 2 0 0 0 2 2h12"/>',
     star: '<path d="M12 3l2.8 5.8 6.2.9-4.5 4.4 1 6.2L12 17.4l-5.5 2.9 1-6.2L3 9.7l6.2-.9z"/>',
+    'thumb-up': '<path d="M7 10v11H3V10zm0 0 5-8c2 0 3 2 2 5l-1 3h6a2 2 0 0 1 2 2l-2 7a2 2 0 0 1-2 2H7"/>',
+    'thumb-down': '<path d="M7 14V3H3v11zm0 0 5 8c2 0 3-2 2-5l-1-3h6a2 2 0 0 0 2-2l-2-7a2 2 0 0 0-2-2H7"/>',
     settings: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
     play: '<path d="M7 4l13 8-13 8z" fill="currentColor"/>',
     check: '<path d="M4 12l5 5L20 6"/>',

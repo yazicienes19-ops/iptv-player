@@ -1,0 +1,2 @@
+# Persönlicher IMDb-Datensatz; separat mit scripts/build_imdb_catalog.py erzeugen.
+*.json

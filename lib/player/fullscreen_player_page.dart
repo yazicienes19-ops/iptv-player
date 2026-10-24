@@ -30,10 +30,12 @@ class _FullscreenPlayerPageState extends ConsumerState<FullscreenPlayerPage> {
 
   bool _nativeFullscreen = false;
   bool _closing = false;
+  final _screenLock = PlayerLockController();
 
   @override
   void initState() {
     super.initState();
+    _screenLock.addListener(_lockChanged);
     _controller = ref.read(playerControllerProvider.notifier);
     // Seitenübergang und Fenster-Zoom nicht gleichzeitig laufen lassen: Diese
     // Überlagerung hat in langen Sitzungen Impeller zum Absturz gebracht.
@@ -59,9 +61,17 @@ class _FullscreenPlayerPageState extends ConsumerState<FullscreenPlayerPage> {
     unawaited(defaultEnterNativeFullscreen());
   }
 
+  void _lockChanged() {
+    if (mounted) setState(() {});
+  }
+
   /// Erst das Fenster aus dem Vollbild holen, dann die Seite schließen.
   Future<void> _close() async {
     if (_closing) return;
+    if (_screenLock.isLocked) {
+      _screenLock.unlock();
+      return;
+    }
     final wasNative = _nativeFullscreen;
     setState(() {
       _closing = true;
@@ -80,6 +90,8 @@ class _FullscreenPlayerPageState extends ConsumerState<FullscreenPlayerPage> {
 
   @override
   void dispose() {
+    _screenLock.removeListener(_lockChanged);
+    _screenLock.dispose();
     if (_nativeFullscreen) defaultExitNativeFullscreen();
     // Wie bei Netflix: Filme und Folgen enden mit dem Schließen, Live läuft eingebettet weiter.
     _controller.stopIfOnDemand();
@@ -89,13 +101,13 @@ class _FullscreenPlayerPageState extends ConsumerState<FullscreenPlayerPage> {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: _closing || !_nativeFullscreen,
+      canPop: !_screenLock.isLocked && (_closing || !_nativeFullscreen),
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) _close();
       },
       child: Scaffold(
         backgroundColor: Colors.black,
-        body: PlayerView(isFullscreen: true, onToggleFullscreen: _close),
+        body: PlayerView(isFullscreen: true, onToggleFullscreen: _close, lockController: _screenLock),
       ),
     );
   }

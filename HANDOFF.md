@@ -1,5 +1,13 @@
 # Handoff – IpFlix
 
+> **Historisches Arbeitsprotokoll.** Dieses Dokument beschreibt den damaligen
+> Entwicklungsstand vom Oktober 2026. Angaben zu installierten Apps, Geräten,
+> Testzahlen und offenen Aufgaben sind keine aktuelle Freigabe. Für Einrichtung
+> und Nutzung gelten die [README](README.md), der
+> [Plattformstand](docs/PLATFORMS.md) und die
+> [Release-Historie](https://github.com/yazicienes19-ops/iptv-player/releases).
+> Persönliche Netzwerkadressen und Schlüsselpfade wurden durch Platzhalter ersetzt.
+
 Stand: 22.10.2026, Commit `dc50bbf` und dieser Handoff. Repo: `github.com/yazicienes19-ops/iptv-player` (privat).
 
 ## Was ist das?
@@ -59,10 +67,11 @@ nächste Folge automatisch, EPG, Suche, Favoriten, Einstellungen, Länderfilter,
 Testen ohne Anbieter: `MOCK_MEDIA=http://<mac-ip>:8768 python3 webos/dev/mock_xtream.py`
 (Login test/test, Port 8766) plus ein Dateiserver mit hls/index.m3u8, live.ts, film.mp4/mkv.
 Fernsteuern über DevTools des TV: `ares-inspect -d tv -a com.enesyazici.ipflix`, dann
-`http://192.168.178.26:9998/json` (Tasten per CDP Input.dispatchKeyEvent, 461 = Zurück).
+`http://<TV-IP>:9998/json` (Tasten per CDP Input.dispatchKeyEvent, 461 = Zurück).
 Video erscheint nicht in Screenshots (eigene Bildebene des TV).
 
-TV eingerichtet: `ares-setup-device` Name `tv`, 192.168.178.26, Schlüssel ~/.ssh/tv_webos.
+TV einrichten: `ares-setup-device`, Gerätename `tv`, Adresse `<TV-IP>`,
+Schlüssel `<PFAD-ZUM-TV-SCHLUESSEL>`.
 Entwicklermodus läuft nach 50 h ab und muss in der Developer-Mode-App verlängert werden.
 Die Flutter-Web-Anpassungen (`lib/services/webos.dart`, `lib/player/mpv/`) bleiben für
 neuere Fernseher/Browser, werden aber nicht mehr gepackt.

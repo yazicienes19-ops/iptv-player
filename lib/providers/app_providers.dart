@@ -14,12 +14,16 @@ import '../models/tmdb.dart';
 import '../models/playlist_credentials.dart';
 import '../services/app_settings.dart';
 import '../services/http_client.dart';
+import '../services/imdb_catalog.dart';
 import '../services/local_store.dart';
+import '../services/personal_library.dart';
+import '../services/recommendations.dart';
 import '../services/m3u_parser.dart';
 import '../services/network_security.dart';
 import '../services/tmdb_api.dart';
 import '../services/playlist_loader.dart';
 import '../services/xtream_api.dart';
+import 'imdb_providers.dart';
 
 /// Wird in `main()` mit der geladenen Instanz überschrieben.
 final sharedPreferencesProvider = Provider<SharedPreferences>(
@@ -157,6 +161,8 @@ final m3uPlaylistProvider = FutureProvider<M3uPlaylist?>((ref) async {
 });
 
 final catalogProvider = FutureProvider.family<Catalog, ContentType>((ref, type) async {
+  final playlist = ref.watch(activePlaylistProvider);
+  final store = ref.read(localStoreProvider);
   final api = ref.watch(xtreamApiProvider);
   final Catalog catalog;
   if (api != null) {
@@ -164,6 +170,18 @@ final catalogProvider = FutureProvider.family<Catalog, ContentType>((ref, type) 
   } else {
     final m3u = await ref.watch(m3uPlaylistProvider.future);
     catalog = m3u?[type] ?? Catalog.empty;
+  }
+  if (ref.mounted && type == ContentType.movie && playlist != null) {
+    // Observe only a successful complete catalog, never a filtered row or a
+    // failed request. Account changes dispose this load before it can commit.
+    try {
+      await store.updatePersonalLibrary(
+        playlist.id,
+        (library) => library.observeMovies(catalog.channels, DateTime.now()),
+      );
+    } catch (_) {
+      // Optional history persistence must not block normal catalog playback.
+    }
   }
   return type == ContentType.live ? borrowMissingLogos(catalog) : catalog;
 });
@@ -194,6 +212,13 @@ Catalog borrowMissingLogos(Catalog catalog) {
             categoryId: c.categoryId,
             epgChannelId: c.epgChannelId,
             xtreamStreamId: c.xtreamStreamId,
+            imdbId: c.imdbId,
+            year: c.year,
+            genres: c.genres,
+            cast: c.cast,
+            director: c.director,
+            addedAt: c.addedAt,
+            seriesId: c.seriesId,
           ),
     ],
   );
@@ -202,6 +227,7 @@ Catalog borrowMissingLogos(Catalog catalog) {
 /// Detailinfos für Filme und Serien (bei Serien inklusive Staffeln).
 final mediaDetailsProvider = FutureProvider.family<MediaDetails, Channel>((ref, channel) async {
   final api = ref.watch(xtreamApiProvider);
+  final playlistId = ref.read(activePlaylistProvider)?.id;
   if (api == null) {
     // M3U: Staffeln stammen aus der Zusammenfassung beim Einlesen.
     if (channel.type != ContentType.series) return MediaDetails.empty;
@@ -209,12 +235,42 @@ final mediaDetailsProvider = FutureProvider.family<MediaDetails, Channel>((ref, 
     return MediaDetails(seasons: catalog.seriesSeasons[channel.id] ?? const []);
   }
   if (channel.xtreamStreamId == null) return MediaDetails.empty;
-  return switch (channel.type) {
-    ContentType.movie => api.getVodDetails(channel),
-    ContentType.series => api.getSeriesDetails(channel),
+  final details = switch (channel.type) {
+    ContentType.movie => await api.getVodDetails(channel),
+    ContentType.series => await api.getSeriesDetails(channel),
     ContentType.live => MediaDetails.empty,
   };
+  await _rememberRecommendationMetadata(
+    ref,
+    playlistId,
+    channel,
+    TitleMetadata(
+      genres:
+          details.genre?.split(RegExp(r'[,/|]')).map((v) => v.trim()).where((v) => v.isNotEmpty).toList() ?? const [],
+      cast: details.cast?.split(',').map((v) => v.trim()).where((v) => v.isNotEmpty).take(10).toList() ?? const [],
+    ),
+  );
+  return details;
 });
+
+Future<void> _rememberRecommendationMetadata(
+  Ref ref,
+  String? playlistId,
+  Channel channel,
+  TitleMetadata metadata,
+) async {
+  if (!ref.mounted || playlistId == null || metadata.isEmpty) return;
+  final store = ref.read(localStoreProvider);
+  final before = store.loadPersonalLibrary(playlistId);
+  final after = before.rememberMetadata(channel, metadata);
+  if (identical(before, after)) return;
+  try {
+    await store.updatePersonalLibrary(playlistId, (library) => library.rememberMetadata(channel, metadata));
+  } catch (_) {
+    // Film information stays usable even if optional preference storage fails.
+  }
+  if (ref.mounted) ref.invalidate(personalLibraryProvider);
+}
 
 // ---------------------------------------------------------------------------
 // Länder-/Sprachfilter
@@ -329,6 +385,7 @@ final channelsByCategoryProvider = Provider.family<AsyncValue<List<(Category, Li
 ) {
   final filter = ref.watch(languageFilterProvider);
   final index = ref.watch(languageIndexProvider(type));
+
   return ref.watch(catalogProvider(type)).whenData((catalog) {
     final grouped = <String, List<Channel>>{};
     for (final channel in catalog.channels) {
@@ -417,6 +474,8 @@ final visibleChannelsProvider = Provider.family<AsyncValue<List<Channel>>, Conte
   final keepSeparators = type == ContentType.live && query.isEmpty && !ref.watch(hideSeparatorsProvider);
   final filter = ref.watch(languageFilterProvider);
   final index = ref.watch(languageIndexProvider(type));
+  final imdb = type == ContentType.live ? null : ref.watch(imdbCatalogProvider).value;
+  final imdbGenre = type == ContentType.movie ? ref.watch(imdbFilterProvider) : null;
 
   return catalog.whenData((c) {
     Iterable<Channel> result = c.channels;
@@ -424,9 +483,24 @@ final visibleChannelsProvider = Provider.family<AsyncValue<List<Channel>>, Conte
     // Pro Sender prüfen: auch gemischte Kategorien zeigen nur das gewählte Land.
     if (filter != null) result = result.where((ch) => index.matches(ch, filter));
     if (category != null) result = result.where((ch) => ch.categoryId == category.id);
-    if (query.isNotEmpty) result = result.where((ch) => ch.name.toLowerCase().contains(query));
+    if (query.isNotEmpty) {
+      result = type == ContentType.live
+          ? result.where((ch) => ch.name.toLowerCase().contains(query))
+          : searchCatalog(result, query, imdb: imdb);
+    }
+    if (imdbGenre != null && imdb != null) result = imdb.ranked(result, genre: imdbGenre).map((row) => row.$1);
     return result.toList();
   });
+});
+
+/// Bewertete Filme der aktiven Playlist und Sprache, unabhängig vom Suchfilter.
+final imdbRowsProvider = Provider<List<(Channel, ImdbMovie)>>((ref) {
+  final imdb = ref.watch(imdbCatalogProvider).value;
+  if (imdb == null) return const [];
+  final channels = ref.watch(catalogProvider(ContentType.movie)).value?.channels ?? const <Channel>[];
+  final language = ref.watch(languageFilterProvider);
+  final index = ref.watch(languageIndexProvider(ContentType.movie));
+  return imdb.ranked(channels.where((channel) => !channel.isSeparator && index.matches(channel, language)));
 });
 
 /// Anzahl echter Einträge (ohne Trennzeilen) je Kategorie-ID, Schlüssel `null` = alle.
@@ -507,6 +581,140 @@ class RecentChannelsNotifier extends Notifier<List<Channel>> {
 }
 
 final recentChannelsProvider = NotifierProvider<RecentChannelsNotifier, List<Channel>>(RecentChannelsNotifier.new);
+
+/// Personal rows are isolated per playlist and contain no stale stream URLs.
+class PersonalLibraryNotifier extends Notifier<PersonalLibrary> {
+  late LocalStore _store;
+  String? _playlistId;
+
+  @override
+  PersonalLibrary build() {
+    _store = ref.watch(localStoreProvider);
+    _playlistId = ref.watch(activePlaylistProvider)?.id;
+    // A successful catalog load may have established/updated the movie baseline.
+    ref.watch(catalogProvider(ContentType.movie));
+    return _playlistId == null ? const PersonalLibrary() : _store.loadPersonalLibrary(_playlistId!);
+  }
+
+  Future<void> addWatch(String playlistId, Channel channel, Duration watched) async {
+    final write = _store.updatePersonalLibrary(
+      playlistId,
+      (library) => library.addWatch(channel, watched, DateTime.now()),
+    );
+    if (ref.mounted && _playlistId == playlistId) state = _store.loadPersonalLibrary(playlistId);
+    await write;
+  }
+
+  Future<void> addVodWatch(
+    String playlistId,
+    Channel channel,
+    Duration watched, {
+    Duration duration = Duration.zero,
+    bool reachedEnd = false,
+    List<String>? capturedKeys,
+  }) async {
+    final keys = capturedKeys ?? recommendationKeys(channel, ref.read(imdbCatalogProvider).value);
+    final write = _store.updatePersonalLibrary(
+      playlistId,
+      (library) => library.addVodWatch(
+        keys,
+        watched,
+        DateTime.now(),
+        duration: duration,
+        reachedEnd: reachedEnd,
+        isMovie: channel.type == ContentType.movie,
+      ),
+    );
+    if (ref.mounted && _playlistId == playlistId) state = _store.loadPersonalLibrary(playlistId);
+    await write;
+  }
+
+  Future<void> toggleFeedback(Channel channel, FeedbackChoice choice) async {
+    final playlistId = _playlistId;
+    if (playlistId == null || channel.type == ContentType.live) return;
+    final keys = recommendationKeys(channel, ref.read(imdbCatalogProvider).value);
+    final sources = [
+      ...?ref.read(catalogProvider(ContentType.movie)).value?.channels,
+      ...?ref.read(catalogProvider(ContentType.series)).value?.channels,
+    ];
+    final selected = reconcileRecommendationHistory(
+      state,
+      sources,
+      ref.read(imdbCatalogProvider).value,
+    ).feedbackFor(keys)?.choice;
+    final write = _store.updatePersonalLibrary(
+      playlistId,
+      (library) => library.setFeedback(keys, selected == choice ? null : choice, DateTime.now()),
+    );
+    state = _store.loadPersonalLibrary(playlistId);
+    await write;
+  }
+}
+
+final personalLibraryProvider = NotifierProvider<PersonalLibraryNotifier, PersonalLibrary>(PersonalLibraryNotifier.new);
+
+final mostWatchedChannelsProvider = Provider<List<Channel>>((ref) {
+  final library = ref.watch(personalLibraryProvider);
+  final catalog = ref.watch(catalogProvider(ContentType.live)).value;
+  final language = ref.watch(languageFilterProvider);
+  final index = ref.watch(languageIndexProvider(ContentType.live));
+  return library.mostWatched(
+    (catalog?.channels ?? const <Channel>[]).where(
+      (channel) => !channel.isSeparator && index.matches(channel, language),
+    ),
+  );
+});
+
+final newMoviesProvider = Provider<List<Channel>>((ref) {
+  final library = ref.watch(personalLibraryProvider);
+  final catalog = ref.watch(catalogProvider(ContentType.movie)).value;
+  final language = ref.watch(languageFilterProvider);
+  final index = ref.watch(languageIndexProvider(ContentType.movie));
+  return library.newMovies(
+    (catalog?.channels ?? const <Channel>[]).where(
+      (channel) => !channel.isSeparator && index.matches(channel, language),
+    ),
+    DateTime.now(),
+  );
+});
+
+final recommendationHistoryProvider = Provider<PersonalLibrary>((ref) {
+  final library = ref.watch(personalLibraryProvider);
+  final imdb = ref.watch(imdbCatalogProvider).value;
+  final sources = [
+    ...?ref.watch(catalogProvider(ContentType.movie)).value?.channels,
+    ...?ref.watch(catalogProvider(ContentType.series)).value?.channels,
+  ];
+  return reconcileRecommendationHistory(library, sources, imdb);
+});
+
+final recommendationFeedbackProvider = Provider.family<FeedbackChoice?, Channel>((ref, channel) {
+  final library = ref.watch(recommendationHistoryProvider);
+  final imdb = ref.watch(imdbCatalogProvider).value;
+  final choice = library.feedbackFor(recommendationKeys(channel, imdb))?.choice;
+  return choice == FeedbackChoice.none ? null : choice;
+});
+
+final recommendationsProvider = Provider<Recommendations>((ref) {
+  final library = ref.watch(personalLibraryProvider);
+  final imdb = ref.watch(imdbCatalogProvider).value;
+  final language = ref.watch(languageFilterProvider);
+  final sources = <Channel>[];
+  final available = <Channel>[];
+  for (final type in [ContentType.movie, ContentType.series]) {
+    final channels = ref.watch(catalogProvider(type)).value?.channels ?? const <Channel>[];
+    final index = ref.watch(languageIndexProvider(type));
+    sources.addAll(channels);
+    available.addAll(channels.where((channel) => index.matches(channel, language)));
+  }
+  return recommendTitles(
+    available: available,
+    sources: sources,
+    library: library,
+    imdb: imdb,
+    favorites: ref.watch(favoritesProvider),
+  );
+});
 
 /// Bekannte große Sender je Sprache, in der Reihenfolge der Senderplätze.
 const _popularByLanguage = <String, List<String>>{
@@ -667,10 +875,22 @@ final tmdbMatchProvider = FutureProvider.family<TmdbRef?, Channel>((ref, channel
 });
 
 final tmdbTitleProvider = FutureProvider.family<TmdbTitle?, Channel>((ref, channel) async {
+  final playlistId = ref.read(activePlaylistProvider)?.id;
   final match = await ref.watch(tmdbMatchProvider(channel).future);
   final api = ref.watch(tmdbApiProvider);
   if (match == null || api == null) return null;
-  return api.title(match.id, match.type);
+  final title = await api.title(match.id, match.type);
+  await _rememberRecommendationMetadata(
+    ref,
+    playlistId,
+    channel,
+    TitleMetadata(
+      genres: title.genres,
+      cast: title.cast.take(10).map((person) => person.name).toList(),
+      director: title.directors.firstOrNull,
+    ),
+  );
+  return title;
 });
 
 final tmdbCollectionProvider = FutureProvider.family<TmdbCollection, int>((ref, id) async {
@@ -690,23 +910,31 @@ class PlaylistTitleIndex {
   PlaylistTitleIndex(Iterable<Channel> channels) {
     for (final channel in channels) {
       if (channel.isSeparator) continue;
-      _byTitle.putIfAbsent(normalizeTitle(channel.display.title), () => []).add(channel);
+      _byTitle.putIfAbsent(catalogTitleKey(cleanCatalogTitle(channel.name).title), () => []).add(channel);
     }
   }
 
   final _byTitle = <String, List<Channel>>{};
 
-  /// Gleicher (Original-)Titel, passende Art; Jahr darf um 1 abweichen.
+  /// Match unique compatible titles; never pick an arbitrary remake when the
+  /// playlist omits the year. Exact known years take precedence over ±1 years.
   Channel? find(TmdbRef ref) {
+    int? yearOf(Channel channel) => channel.year ?? cleanCatalogTitle(channel.name).year;
     final wantedType = ref.type == TmdbMediaType.tv ? ContentType.series : ContentType.movie;
+    final candidates = <String, Channel>{};
     for (final title in {ref.title, ?ref.originalTitle}) {
-      final candidates = (_byTitle[normalizeTitle(title)] ?? const <Channel>[]).where((c) => c.type == wantedType);
-      for (final c in candidates) {
-        final year = c.releaseYear;
-        if (year == null || ref.year == null || (year - ref.year!).abs() <= 1) return c;
+      for (final channel in _byTitle[catalogTitleKey(title)] ?? const <Channel>[]) {
+        if (channel.type == wantedType) candidates.putIfAbsent(personalItemKey(channel), () => channel);
       }
     }
-    return null;
+    final all = candidates.values.toList();
+    if (ref.year == null) return all.length == 1 ? all.single : null;
+    final exact = all.where((channel) => yearOf(channel) == ref.year).toList();
+    if (exact.isNotEmpty) return exact.length == 1 ? exact.single : null;
+    final compatible = all
+        .where((channel) => yearOf(channel) == null || (yearOf(channel)! - ref.year!).abs() <= 1)
+        .toList();
+    return compatible.length == 1 ? compatible.single : null;
   }
 }
 

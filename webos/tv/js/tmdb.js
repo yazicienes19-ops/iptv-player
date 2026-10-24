@@ -56,6 +56,7 @@
 
   /// "DE - Der Pate (1972) 4K" → { title: "Der Pate", year: 1972 }
   App.cleanTitle = function (name) {
+    if (typeof App.catalogTitle === 'function') return App.catalogTitle(name);
     let text = (name || '').replace(PROVIDER_PREFIX, '').replace(COUNTRY_PREFIX, '').replace(NOISE, ' ');
     text = text.replace(/\s+/g, ' ').trim();
     let year = null;
@@ -98,18 +99,18 @@
   }
 
   function bestMatch(results, title, year) {
-    const wanted = App.normalizeTitle(title);
-    const score = (r) => {
-      let points = 0;
-      if (App.normalizeTitle(r.title) === wanted || App.normalizeTitle(r.originalTitle) === wanted) points += 10;
-      if (year && r.year) {
-        const diff = Math.abs(r.year - year);
-        if (diff === 0) points += 5;
-        if (diff === 1) points += 3;
-      }
-      return points;
-    };
-    return results.slice().sort((a, b) => score(b) - score(a))[0];
+    const normalize = App.catalogTitleKey || App.catalogNormalize || App.normalizeTitle;
+    const wanted = normalize(title);
+    const unique = Object.create(null);
+    const exact = results.filter((r) => {
+      if (unique[r.id] || year && r.year !== year) return false;
+      if (normalize(r.title) !== wanted && normalize(r.originalTitle || '') !== wanted) return false;
+      unique[r.id] = true;
+      return true;
+    });
+    // Popularity is not identity. Two remakes without a year must not be
+    // resolved to whichever result the API happened to return first.
+    return exact.length === 1 ? exact[0] : null;
   }
 
   function search(title, type, year) {
@@ -120,11 +121,14 @@
       if (withYear) params[yearParam] = withYear;
       return get(path, params).then((data) => (data.results || []).map((r) => ref(r, type)));
     };
-    // Jahresangaben in Playlists weichen oft um ein Jahr ab.
+    // A broader retry may find an omitted result; identity still requires the
+    // supplied year. A different remake must not silently supply metadata.
     return run(year)
       .then((results) => (results.length || !year ? results : run(null)))
       .then((results) => (results.length ? bestMatch(results, title, year) : null));
   }
+
+  App.pickTmdbMatch = bestMatch;
 
   // ---------- Titel, Personen, Filmreihen ----------
 
@@ -241,7 +245,7 @@
           lists.forEach((list) =>
             list.forEach((item) => {
               const clean = App.cleanTitle(item.name);
-              const key = App.normalizeTitle(clean.title);
+              const key = (App.catalogTitleKey || App.normalizeTitle)(clean.title);
               (byTitle[key] = byTitle[key] || []).push({ item: item, year: clean.year || parseInt(item.year, 10) || null });
             })
           );
@@ -270,14 +274,24 @@
       refs.map((r) => {
         const kind = r.type === 'tv' ? 'series' : 'movie';
         const titles = [r.title, r.originalTitle].filter(Boolean);
-        for (let t = 0; t < titles.length; t++) {
-          const candidates = (byTitle[App.normalizeTitle(titles[t])] || []).filter((c) => c.item.kind === kind);
-          for (let i = 0; i < candidates.length; i++) {
-            const c = candidates[i];
-            if (!c.year || !r.year || Math.abs(c.year - r.year) <= 1) return c.item;
-          }
-        }
-        return null;
+        const seen = Object.create(null);
+        const candidates = [];
+        titles.forEach((name) => {
+          const key = (App.catalogTitleKey || App.normalizeTitle)(name);
+          (byTitle[key] || []).forEach((candidate) => {
+            const item = candidate.item;
+            const identity = item.kind + ':' + (item.id != null ? item.id : item.url || item.name);
+            if (item.kind === kind && !seen[identity]) {
+              seen[identity] = true;
+              candidates.push(candidate);
+            }
+          });
+        });
+        if (!r.year) return candidates.length === 1 ? candidates[0].item : null;
+        const exact = candidates.filter((candidate) => candidate.year === r.year);
+        if (exact.length) return exact.length === 1 ? exact[0].item : null;
+        const compatible = candidates.filter((candidate) => !candidate.year || Math.abs(candidate.year - r.year) <= 1);
+        return compatible.length === 1 ? compatible[0].item : null;
       })
     );
   }

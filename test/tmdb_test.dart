@@ -140,8 +140,11 @@ void main() {
       const TmdbRef(id: 2, type: TmdbMediaType.movie, title: 'Dune: Part Two', year: 2024),
       const TmdbRef(id: 3, type: TmdbMediaType.movie, title: 'Dune', year: 2021),
     ];
-    expect(TmdbApi.pickBestMatch(results, 'Dune', year: 2021).id, 3);
-    expect(TmdbApi.pickBestMatch(results, 'Dune: Part Two').id, 2);
+    expect(TmdbApi.pickBestMatch(results, 'Dune', year: 2021)?.id, 3);
+    expect(TmdbApi.pickBestMatch(results, 'Dune: Part Two')?.id, 2);
+    expect(TmdbApi.pickBestMatch(results, 'Dune'), isNull);
+    expect(TmdbApi.pickBestMatch(results, 'Dune', year: 2020), isNull);
+    expect(TmdbApi.pickBestMatch(results, 'Other movie'), isNull);
   });
 
   test('Reihe: Teile nach Jahr, angekündigte Teile ans Ende', () {

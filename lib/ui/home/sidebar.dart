@@ -28,51 +28,76 @@ class GlassSidebar extends ConsumerWidget {
       width: width,
       child: Glass(
         border: false,
-        tint: const Color(0xB80C0E13),
-        blur: 32,
+        tint: const Color(0xEB0B0E14),
+        blur: 20,
         child: DecoratedBox(
           decoration: const BoxDecoration(
-            border: Border(right: BorderSide(color: Color(0x14FFFFFF))),
+            border: Border(right: BorderSide(color: Color(0x10FFFFFF))),
           ),
           child: SafeArea(
             right: false,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const Padding(padding: EdgeInsets.fromLTRB(20, 18, 16, 14), child: _Brand()),
-                const Padding(padding: EdgeInsets.fromLTRB(12, 0, 12, 14), child: LanguageFilterButton()),
-                for (final s in AppSection.values)
-                  _NavItem(
-                    icon: s == section ? sectionIcons[s]!.$2 : sectionIcons[s]!.$1,
-                    label: s.label,
-                    selected: s == section,
-                    onTap: () => ref.read(sectionProvider.notifier).select(s),
-                  ),
-                if (section == AppSection.live) ...[
-                  const Padding(padding: EdgeInsets.fromLTRB(16, 10, 16, 8), child: Divider(height: 1)),
-                  const Expanded(
-                    child: CategoryList(key: ValueKey(ContentType.live), type: ContentType.live),
-                  ),
-                ] else
-                  const Spacer(),
-                const Divider(height: 1, indent: 16, endIndent: 16),
-                const SizedBox(height: 6),
-                _NavItem(
-                  icon: Icons.playlist_play_rounded,
-                  label: ref.watch(activePlaylistProvider)?.name ?? 'Playlist',
-                  selected: false,
-                  dense: true,
-                  onTap: () => showPlaylistSheet(context),
-                ),
-                _NavItem(
-                  icon: Icons.settings_rounded,
-                  label: 'Einstellungen',
-                  selected: false,
-                  dense: true,
-                  onTap: () => Navigator.of(context).push(SettingsPage.route()),
-                ),
-                const Padding(padding: EdgeInsets.fromLTRB(22, 6, 16, 14), child: _VpnLine()),
-              ],
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final compactHeight = constraints.maxHeight < 640;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: EdgeInsets.fromLTRB(22, compactHeight ? 8 : 26, 18, compactHeight ? 12 : 28),
+                      child: const _Brand(),
+                    ),
+                    Padding(
+                      padding: EdgeInsets.fromLTRB(14, 0, 14, compactHeight ? 8 : 22),
+                      child: const LanguageFilterButton(),
+                    ),
+                    if (!compactHeight)
+                      const Padding(
+                        padding: EdgeInsets.fromLTRB(24, 0, 16, 10),
+                        child: Text(
+                          'ENTDECKEN',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.8,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      ),
+                    for (final s in AppSection.values)
+                      _NavItem(
+                        icon: s == section ? sectionIcons[s]!.$2 : sectionIcons[s]!.$1,
+                        label: s.label,
+                        selected: s == section,
+                        compact: compactHeight,
+                        onTap: () => ref.read(sectionProvider.notifier).select(s),
+                      ),
+                    if (section == AppSection.live) ...[
+                      const Padding(padding: EdgeInsets.fromLTRB(16, 10, 16, 8), child: Divider(height: 1)),
+                      const Expanded(
+                        child: CategoryList(key: ValueKey(ContentType.live), type: ContentType.live),
+                      ),
+                    ] else
+                      const Spacer(),
+                    const Divider(height: 1, indent: 16, endIndent: 16),
+                    const SizedBox(height: 6),
+                    _NavItem(
+                      icon: Icons.playlist_play_rounded,
+                      label: ref.watch(activePlaylistProvider)?.name ?? 'Playlist',
+                      selected: false,
+                      dense: true,
+                      onTap: () => showPlaylistSheet(context),
+                    ),
+                    _NavItem(
+                      icon: Icons.settings_rounded,
+                      label: 'Einstellungen',
+                      selected: false,
+                      dense: true,
+                      onTap: () => Navigator.of(context).push(SettingsPage.route()),
+                    ),
+                    const Padding(padding: EdgeInsets.fromLTRB(22, 6, 16, 14), child: _VpnLine()),
+                  ],
+                );
+              },
             ),
           ),
         ),
@@ -89,24 +114,13 @@ class _Brand extends StatelessWidget {
     return Row(
       children: [
         Container(
-          width: 28,
-          height: 28,
-          decoration: const BoxDecoration(color: AppColors.accent, shape: BoxShape.circle),
-          child: const Icon(Icons.live_tv_rounded, size: 16, color: Colors.white),
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(color: AppColors.accent, borderRadius: BorderRadius.circular(10)),
+          child: const Icon(Icons.play_arrow_rounded, size: 25, color: AppColors.background),
         ),
-        const SizedBox(width: 10),
-        const Text.rich(
-          TextSpan(
-            children: [
-              TextSpan(text: 'Ip'),
-              TextSpan(
-                text: 'Flix',
-                style: TextStyle(color: AppColors.accent),
-              ),
-            ],
-          ),
-          style: TextStyle(fontSize: 19, fontWeight: FontWeight.w900, letterSpacing: -0.4),
-        ),
+        const SizedBox(width: 11),
+        const Text('IpFlix', style: TextStyle(fontSize: 23, fontWeight: FontWeight.w800, letterSpacing: -0.8)),
       ],
     );
   }
@@ -119,6 +133,7 @@ class _NavItem extends StatefulWidget {
     required this.selected,
     required this.onTap,
     this.dense = false,
+    this.compact = false,
   });
 
   final IconData icon;
@@ -126,6 +141,7 @@ class _NavItem extends StatefulWidget {
   final bool selected;
   final VoidCallback onTap;
   final bool dense;
+  final bool compact;
 
   @override
   State<_NavItem> createState() => _NavItemState();
@@ -150,23 +166,30 @@ class _NavItemState extends State<_NavItem> {
           onTap: widget.onTap,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
-            margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-            padding: EdgeInsets.symmetric(horizontal: 12, vertical: widget.dense ? 8 : 11),
+            margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 3),
+            padding: EdgeInsets.symmetric(horizontal: 12, vertical: widget.dense ? 9 : (widget.compact ? 10 : 12)),
             decoration: BoxDecoration(
               color: selected
-                  ? Colors.white.withValues(alpha: 0.12)
+                  ? AppColors.accent.withValues(alpha: 0.11)
                   : lit
                   ? Colors.white.withValues(alpha: 0.06)
                   : Colors.transparent,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: _focused ? Colors.white : Colors.transparent, width: 2),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: _focused
+                    ? Colors.white
+                    : selected
+                    ? AppColors.accent.withValues(alpha: 0.15)
+                    : Colors.transparent,
+                width: 2,
+              ),
             ),
             child: Row(
               children: [
                 Icon(
                   widget.icon,
                   size: widget.dense ? 19 : 21,
-                  color: selected ? AppColors.textPrimary : AppColors.textSecondary,
+                  color: selected ? AppColors.accent : (lit ? AppColors.textPrimary : AppColors.textSecondary),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
@@ -183,9 +206,9 @@ class _NavItemState extends State<_NavItem> {
                 ),
                 if (selected && !widget.dense)
                   Container(
-                    width: 6,
-                    height: 6,
-                    decoration: const BoxDecoration(color: AppColors.accent, shape: BoxShape.circle),
+                    width: 3,
+                    height: 16,
+                    decoration: BoxDecoration(color: AppColors.accent, borderRadius: BorderRadius.circular(2)),
                   ),
               ],
             ),

@@ -47,3 +47,7 @@ app.*.map.json
 # Widget Preview related
 .widget_preview/
 /dist/
+
+# Local release dry runs and recovery output
+/release-plan.json
+/release-notes.md

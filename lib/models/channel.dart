@@ -13,6 +13,13 @@ class Channel {
     this.categoryId,
     this.epgChannelId,
     this.xtreamStreamId,
+    this.imdbId,
+    this.year,
+    this.genres = const [],
+    this.cast = const [],
+    this.director,
+    this.addedAt,
+    this.seriesId,
   });
 
   /// Innerhalb einer Playlist eindeutig (Xtream-ID oder Stream-URL).
@@ -29,6 +36,19 @@ class Channel {
   /// Nur bei Xtream gesetzt; nötig für die Kurz-EPG-Abfrage.
   final int? xtreamStreamId;
 
+  /// Anbieter-Metadaten; Bewertungen werden separat mit ihrer Quelle geführt.
+  final String? imdbId;
+  final int? year;
+  final List<String> genres;
+  final List<String> cast;
+  final String? director;
+
+  /// When the provider added the entry to its playlist (not release date).
+  final String? addedAt;
+
+  /// Parent catalog series for an episode; playback history belongs to the show.
+  final String? seriesId;
+
   bool get isPlayable => streamUrl.isNotEmpty;
 
   Map<String, dynamic> toJson() => {
@@ -40,6 +60,13 @@ class Channel {
     'categoryId': categoryId,
     'epgChannelId': epgChannelId,
     'xtreamStreamId': xtreamStreamId,
+    'imdbId': imdbId,
+    'year': year,
+    'genres': genres,
+    'cast': cast,
+    'director': director,
+    'addedAt': addedAt,
+    'seriesId': seriesId,
   };
 
   factory Channel.fromJson(Map<String, dynamic> json) => Channel(
@@ -51,6 +78,13 @@ class Channel {
     categoryId: json['categoryId'] as String?,
     epgChannelId: json['epgChannelId'] as String?,
     xtreamStreamId: json['xtreamStreamId'] as int?,
+    imdbId: json['imdbId'] as String?,
+    year: json['year'] as int?,
+    genres: (json['genres'] as List?)?.whereType<String>().toList() ?? const [],
+    cast: (json['cast'] as List?)?.whereType<String>().toList() ?? const [],
+    director: json['director'] as String?,
+    addedAt: json['addedAt'] as String?,
+    seriesId: json['seriesId'] as String?,
   );
 
   @override

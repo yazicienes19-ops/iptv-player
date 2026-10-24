@@ -25,15 +25,21 @@ class M3uParser {
   /// Ergebnis per `Isolate.exit` zurück, also ohne teure Kopie.
   static Future<M3uPlaylist> parseInBackground(Uint8List bytes) {
     // Im Browser gibt es keine Isolates; dort wird direkt geparst.
-    if (kIsWeb) return Future(() => parse(utf8.decode(bytes, allowMalformed: true)));
+    if (kIsWeb) {
+      return Future(() => parse(utf8.decode(bytes, allowMalformed: true)));
+    }
     return Isolate.run(() => parse(utf8.decode(bytes, allowMalformed: true)));
   }
 
   static final _attributePattern = RegExp(r'([\w-]+)="([^"]*)"');
 
   static M3uPlaylist parse(String content) {
-    final channels = <ContentType, List<Channel>>{for (final t in ContentType.values) t: []};
-    final categories = <ContentType, Map<String, Category>>{for (final t in ContentType.values) t: {}};
+    final channels = <ContentType, List<Channel>>{
+      for (final t in ContentType.values) t: [],
+    };
+    final categories = <ContentType, Map<String, Category>>{
+      for (final t in ContentType.values) t: {},
+    };
 
     Map<String, String>? attributes;
     String? title;
@@ -45,7 +51,8 @@ class M3uParser {
 
       if (line.startsWith('#EXTINF')) {
         attributes = {
-          for (final m in _attributePattern.allMatches(line)) m.group(1)!.toLowerCase(): m.group(2)!.trim(),
+          for (final m in _attributePattern.allMatches(line))
+            m.group(1)!.toLowerCase(): m.group(2)!.trim(),
         };
         title = _titleOf(line);
         extGroup = null;
@@ -63,7 +70,8 @@ class M3uParser {
           groupName,
           () => Category.cleaned(id: groupName, rawName: groupName, type: type),
         );
-        final name = (title?.isNotEmpty == true ? title : attributes['tvg-name']) ?? url;
+        final name =
+            (title?.isNotEmpty == true ? title : attributes['tvg-name']) ?? url;
         final logo = attributes['tvg-logo'];
 
         channels[type]!.add(
@@ -93,7 +101,10 @@ class M3uParser {
                 channels: series.series,
                 seriesSeasons: series.seasons,
               )
-            : Catalog(categories: categories[type]!.values.toList(), channels: channels[type]!),
+            : Catalog(
+                categories: categories[type]!.values.toList(),
+                channels: channels[type]!,
+              ),
     });
   }
 
@@ -109,7 +120,9 @@ class M3uParser {
     return '';
   }
 
-  static final _vodExtension = RegExp(r'\.(mp4|mkv|avi|mov|m4v|wmv|flv)(\?|$)');
+  static final _vodExtension = RegExp(
+    r'^[^?#]*\.(mp4|mkv|avi|mov|m4v|wmv|flv|webm|ogv|mpg|mpeg|m2ts|vob)([?#]|$)',
+  );
 
   /// Gruppennamen wie „Movies“ allein reichen nicht: Viele Listen führen dort
   /// 24/7-Live-Sender. Filme/Serien erkennen wir an der URL-Struktur, an
@@ -119,7 +132,8 @@ class M3uParser {
     if (lower.contains('/series/')) return ContentType.series;
     if (lower.contains('/movie/')) return ContentType.movie;
     final group = (attributes['group-title'] ?? '').toLowerCase();
-    final isOnDemand = _vodExtension.hasMatch(lower) || RegExp(r'\bvod\b').hasMatch(group);
+    final isOnDemand =
+        _vodExtension.hasMatch(lower) || RegExp(r'\bvod\b').hasMatch(group);
     if (!isOnDemand) return ContentType.live;
     return group.contains('serie') ? ContentType.series : ContentType.movie;
   }

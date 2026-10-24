@@ -5,9 +5,10 @@ import '../../providers/app_providers.dart';
 import '../theme.dart';
 
 class SearchField extends ConsumerStatefulWidget {
-  const SearchField({super.key, required this.section});
+  const SearchField({super.key, required this.section, this.hintText});
 
   final AppSection section;
+  final String? hintText;
 
   @override
   ConsumerState<SearchField> createState() => _SearchFieldState();
@@ -37,7 +38,7 @@ class _SearchFieldState extends ConsumerState<SearchField> {
       controller: _controller,
       onChanged: notifier.set,
       decoration: InputDecoration(
-        hintText: '${widget.section.label} durchsuchen',
+        hintText: widget.hintText ?? '${widget.section.label} durchsuchen',
         prefixIcon: const Icon(Icons.search, size: 20),
         suffixIcon: ListenableBuilder(
           listenable: _controller,
