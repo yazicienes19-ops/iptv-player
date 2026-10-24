@@ -10,6 +10,7 @@ import '../../models/channel.dart';
 import '../../models/channel_name.dart';
 import '../../models/content_type.dart';
 import '../../providers/app_providers.dart';
+import '../../providers/imdb_providers.dart';
 import '../detail/detail_page.dart';
 import '../theme.dart';
 import '../widgets/channel_views.dart';
@@ -35,7 +36,8 @@ class BrowseView extends ConsumerWidget {
     final section = AppSection.values.firstWhere((s) => s.contentType == type);
     final query = ref.watch(searchQueryProvider(section)).trim();
     final category = ref.watch(selectedCategoryProvider(type));
-    final filtering = query.isNotEmpty || category != null;
+    final filtering =
+        query.isNotEmpty || category != null || type == ContentType.movie && ref.watch(imdbFilterProvider) != null;
     final hPad = compact ? 16.0 : 40.0;
     final rows = ref.watch(channelsByCategoryProvider(type));
 
@@ -69,10 +71,21 @@ class BrowseView extends ConsumerWidget {
                   SliverToBoxAdapter(child: SizedBox(height: compact ? 72 : 96)),
                 SliverToBoxAdapter(
                   child: Padding(
-                    padding: const EdgeInsets.only(top: 4, bottom: 18),
+                    padding: const EdgeInsets.only(top: 4, bottom: 24),
                     child: CategoryPills(type: type, horizontalPadding: hPad, leadingInset: leftInset),
                   ),
                 ),
+                if (type == ContentType.movie)
+                  SliverToBoxAdapter(
+                    child: ImdbFilters(left: leftInset + hPad, right: hPad),
+                  ),
+                if (query.isNotEmpty)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(leftInset + hPad, 0, hPad, 20),
+                      child: Text('Ergebnisse für „$query“', style: Theme.of(context).textTheme.headlineSmall),
+                    ),
+                  ),
                 if (filtering)
                   ...filteredGridSlivers(
                     context,
@@ -121,13 +134,63 @@ class GlassSearch extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Glass(
-      radius: 12,
-      tint: const Color(0x8A0E1117),
+      radius: 14,
+      tint: const Color(0xCC10141C),
       child: Theme(
         data: Theme.of(context).copyWith(
           inputDecorationTheme: Theme.of(context).inputDecorationTheme.copyWith(fillColor: Colors.transparent),
         ),
-        child: SearchField(section: section),
+        child: SearchField(section: section, hintText: 'Titel, Genres oder „Filme wie …“'),
+      ),
+    );
+  }
+}
+
+class ImdbFilters extends ConsumerWidget {
+  const ImdbFilters({super.key, required this.left, required this.right});
+  final double left;
+  final double right;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final catalog = ref.watch(imdbCatalogProvider).value;
+    if (catalog == null) return const SizedBox.shrink();
+    final selected = ref.watch(imdbFilterProvider);
+    return Padding(
+      padding: EdgeInsets.fromLTRB(left, 0, right, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final option in <(String?, String)>[
+                (null, 'Alle Filme'),
+                ('', 'Beste Filme · IMDb'),
+                ('Crime', 'Beste Krimis'),
+                ('Thriller', 'Thriller'),
+                ('Sci-Fi', 'Science-Fiction'),
+                ('Comedy', 'Komödien'),
+              ])
+                ChoiceChip(
+                  label: Text(option.$2),
+                  selected: selected == option.$1,
+                  onSelected: (_) {
+                    ref.read(imdbFilterProvider.notifier).select(option.$1);
+                    ref.read(selectedCategoryProvider(ContentType.movie).notifier).select(null);
+                  },
+                ),
+            ],
+          ),
+          if (selected != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              'IMDb-Bewertung · ab ${catalog.minVotes} Stimmen · verfügbare Titel deiner Playlist',
+              style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -220,49 +283,45 @@ class _HeroCarouselState extends State<HeroCarousel> {
   @override
   Widget build(BuildContext context) {
     final channel = widget.items[_index];
-    return SizedBox(
-      height: widget.compact ? 470 : 420,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 700),
-            child: HeroBanner(
-              key: ValueKey(channel.id),
-              channel: channel,
-              compact: widget.compact,
-              leftInset: widget.leftInset,
-              horizontalPadding: widget.horizontalPadding,
-            ),
+    return Stack(
+      children: [
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 700),
+          child: HeroBanner(
+            key: ValueKey(channel.id),
+            channel: channel,
+            compact: widget.compact,
+            leftInset: widget.leftInset,
+            horizontalPadding: widget.horizontalPadding,
           ),
-          if (widget.items.length > 1)
-            Positioned(
-              right: widget.horizontalPadding,
-              bottom: 22,
-              child: Row(
-                children: [
-                  for (var i = 0; i < widget.items.length; i++)
-                    GestureDetector(
-                      onTap: () {
-                        setState(() => _index = i);
-                        _restart();
-                      },
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 250),
-                        margin: const EdgeInsets.only(left: 6),
-                        width: i == _index ? 22 : 7,
-                        height: 7,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: i == _index ? 0.9 : 0.35),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
+        ),
+        if (widget.items.length > 1)
+          Positioned(
+            right: widget.horizontalPadding,
+            bottom: 24,
+            child: Row(
+              children: [
+                for (var i = 0; i < widget.items.length; i++)
+                  GestureDetector(
+                    onTap: () {
+                      setState(() => _index = i);
+                      _restart();
+                    },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 250),
+                      margin: const EdgeInsets.only(left: 7),
+                      width: i == _index ? 26 : 6,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: i == _index ? 0.9 : 0.35),
+                        borderRadius: BorderRadius.circular(4),
                       ),
                     ),
-                ],
-              ),
+                  ),
+              ],
             ),
-        ],
-      ),
+          ),
+      ],
     );
   }
 }
@@ -293,126 +352,141 @@ class HeroBanner extends ConsumerWidget {
     final now = DateTime.now().year;
     final isNew = (year != null && year >= now - 1) || (category?.toLowerCase().contains('neuerscheinung') ?? false);
 
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        // Ambient-Glow: stark weichgezeichnetes, abgedunkeltes Poster bzw. echtes Backdrop.
-        if (details?.backdrop != null) MediaImage(url: details!.backdrop) else _AmbientGlow(poster: channel.logo),
-        const DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Color(0xF20A0C10), Color(0xA60A0C10), Color(0x330A0C10)],
-              stops: [0, 0.5, 1],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final showPoster = !compact && constraints.maxWidth - leftInset - 2 * horizontalPadding >= 840;
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  // Ambient-Glow: stark weichgezeichnetes, abgedunkeltes Poster bzw. echtes Backdrop.
+                  if (details?.backdrop != null || compact)
+                    MediaImage(url: details?.backdrop ?? channel.logo)
+                  else
+                    _AmbientGlow(poster: channel.logo),
+                  const DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [Color(0xF5090B10), Color(0xB3090B10), Color(0x1A090B10)],
+                        stops: [0, 0.52, 1],
+                      ),
+                    ),
+                  ),
+                  const DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Color(0x66090B10), Color(0x00090B10), Color(0xFF090B10)],
+                        stops: [0, 0.3, 1],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ),
-        const DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Color(0x660A0C10), Color(0x000A0C10), Color(0xFF0A0C10)],
-              stops: [0, 0.35, 1],
-            ),
-          ),
-        ),
-        Padding(
-          padding: EdgeInsets.fromLTRB(leftInset + horizontalPadding, compact ? 72 : 40, horizontalPadding, 40),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  crossAxisAlignment: CrossAxisAlignment.start,
+            ConstrainedBox(
+              constraints: BoxConstraints(minHeight: compact ? 500 : 540),
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(leftInset + horizontalPadding, 90, horizontalPadding, 64),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    if (compact) ...[
-                      Center(child: _HeroPoster(channel: channel, width: 150)),
-                      const SizedBox(height: 18),
+                    Expanded(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            channel.type == ContentType.series ? 'SERIEN ENTDECKEN' : 'DEIN NÄCHSTER FILM',
+                            style: const TextStyle(
+                              color: AppColors.accent,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 2.4,
+                              fontSize: 11,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 620),
+                            child: Text(
+                              name.title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: (compact ? textTheme.headlineMedium : textTheme.displaySmall)?.copyWith(
+                                fontWeight: FontWeight.w800,
+                                fontSize: compact ? 32 : 44,
+                                height: 1.08,
+                                letterSpacing: -1.2,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              if (isNew) const HeroPill(text: 'NEU', accent: true),
+                              for (final q in name.qualities.take(2)) HeroPill(text: q.label),
+                              if (year != null) HeroPill(text: '$year'),
+                              if (category != null) HeroPill(text: category),
+                              if (seasons.isNotEmpty) HeroPill(text: seasonSummary(seasons)),
+                              if (details?.rating != null && details!.rating! > 0)
+                                HeroPill(text: '★ ${details.rating!.toStringAsFixed(1)}'),
+                            ],
+                          ),
+                          if (!compact && details?.plot != null) ...[
+                            const SizedBox(height: 12),
+                            ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 560),
+                              child: Text(
+                                details!.plot!,
+                                maxLines: 3,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 15, height: 1.55, color: Color(0xFFBAC2D0)),
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 24),
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 12,
+                            children: [
+                              _PlayButton(
+                                label: 'Abspielen',
+                                icon: Icons.play_arrow_rounded,
+                                onPressed: () => _play(context, ref, seasons),
+                              ),
+                              _GlassButton(
+                                label: isFavorite ? 'In meiner Liste' : 'Meine Liste',
+                                icon: isFavorite ? Icons.check_rounded : Icons.add_rounded,
+                                onPressed: () => ref.read(favoritesProvider.notifier).toggle(channel),
+                              ),
+                              _GlassButton(
+                                icon: Icons.info_outline_rounded,
+                                tooltip: 'Mehr Infos',
+                                onPressed: () => Navigator.of(context).push(DetailPage.route(channel, [channel])),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (showPoster && details?.backdrop == null && channel.logo != null) ...[
+                      const SizedBox(width: 48),
+                      _HeroPoster(channel: channel, height: 330),
                     ],
-                    Text(
-                      channel.type == ContentType.series ? 'SERIE' : 'FILM',
-                      style: const TextStyle(
-                        color: AppColors.textSecondary,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 2.4,
-                        fontSize: 11,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 620),
-                      child: Text(
-                        name.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: (compact ? textTheme.headlineMedium : textTheme.displaySmall)?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          height: 1.05,
-                          letterSpacing: -0.8,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        if (isNew) const HeroPill(text: 'NEU', accent: true),
-                        for (final q in name.qualities.take(2)) HeroPill(text: q.label),
-                        if (year != null) HeroPill(text: '$year'),
-                        if (category != null) HeroPill(text: category),
-                        if (seasons.isNotEmpty) HeroPill(text: seasonSummary(seasons)),
-                        if (details?.rating != null && details!.rating! > 0)
-                          HeroPill(text: '★ ${details.rating!.toStringAsFixed(1)}'),
-                      ],
-                    ),
-                    if (!compact && details?.plot != null) ...[
-                      const SizedBox(height: 12),
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 560),
-                        child: Text(
-                          details!.plot!,
-                          maxLines: 3,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(height: 1.45, color: Color(0xFFD0D3D9)),
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 24),
-                    Row(
-                      children: [
-                        _GlowButton(
-                          label: 'Abspielen',
-                          icon: Icons.play_arrow_rounded,
-                          onPressed: () => _play(context, ref, seasons),
-                        ),
-                        const SizedBox(width: 12),
-                        _GlassButton(
-                          label: isFavorite ? 'In meiner Liste' : 'Meine Liste',
-                          icon: isFavorite ? Icons.check_rounded : Icons.add_rounded,
-                          onPressed: () => ref.read(favoritesProvider.notifier).toggle(channel),
-                        ),
-                        const SizedBox(width: 10),
-                        _GlassButton(
-                          icon: Icons.info_outline_rounded,
-                          tooltip: 'Mehr Infos',
-                          onPressed: () => Navigator.of(context).push(DetailPage.route(channel, [channel])),
-                        ),
-                      ],
-                    ),
                   ],
                 ),
               ),
-              if (!compact && details?.backdrop == null && channel.logo != null) ...[
-                const SizedBox(width: 32),
-                _HeroPoster(channel: channel, height: 300),
-              ],
-            ],
-          ),
-        ),
-      ],
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -445,20 +519,24 @@ class HeroPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      constraints: const BoxConstraints(maxWidth: 260),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
       decoration: BoxDecoration(
-        color: accent ? AppColors.accent : Colors.white.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: accent ? Colors.transparent : Colors.white.withValues(alpha: 0.14)),
+        color: accent ? AppColors.accent.withValues(alpha: 0.16) : Colors.white.withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(
+          color: accent ? AppColors.accent.withValues(alpha: 0.25) : Colors.white.withValues(alpha: 0.1),
+        ),
       ),
       child: Text(
         text,
         maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: TextStyle(
           fontSize: 12,
           fontWeight: accent ? FontWeight.w800 : FontWeight.w600,
           letterSpacing: accent ? 1 : 0.2,
-          color: Colors.white,
+          color: accent ? AppColors.accent : AppColors.textPrimary,
           height: 1.2,
         ),
       ),
@@ -466,45 +544,47 @@ class HeroPill extends StatelessWidget {
   }
 }
 
-/// Leuchtender Haupt-Knopf mit rotem Schein.
-class _GlowButton extends StatefulWidget {
-  const _GlowButton({required this.label, required this.icon, required this.onPressed});
+/// Klarer, kontrastreicher Haupt-Knopf vor dem Kino-Banner.
+class _PlayButton extends StatefulWidget {
+  const _PlayButton({required this.label, required this.icon, required this.onPressed});
 
   final String label;
   final IconData icon;
   final VoidCallback onPressed;
 
   @override
-  State<_GlowButton> createState() => _GlowButtonState();
+  State<_PlayButton> createState() => _PlayButtonState();
 }
 
-class _GlowButtonState extends State<_GlowButton> {
-  bool _lit = false;
+class _PlayButtonState extends State<_PlayButton> {
+  bool _hovered = false;
+  bool _focused = false;
 
   @override
   Widget build(BuildContext context) {
+    final lit = _hovered || _focused;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _focused ? AppColors.accent : Colors.transparent, width: 2),
         boxShadow: [
           BoxShadow(
-            color: AppColors.accent.withValues(alpha: _lit ? 0.75 : 0.45),
-            blurRadius: _lit ? 30 : 20,
-            spreadRadius: _lit ? 1 : 0,
+            color: Colors.black.withValues(alpha: lit ? 0.35 : 0.2),
+            blurRadius: lit ? 24 : 16,
             offset: const Offset(0, 6),
           ),
         ],
       ),
       child: FilledButton.icon(
-        onHover: (v) => setState(() => _lit = v),
-        onFocusChange: (v) => setState(() => _lit = v),
+        onHover: (v) => setState(() => _hovered = v),
+        onFocusChange: (v) => setState(() => _focused = v),
         style: FilledButton.styleFrom(
-          backgroundColor: AppColors.accent,
-          foregroundColor: Colors.white,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 17),
-          textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15.5, letterSpacing: 0.2),
+          backgroundColor: lit ? const Color(0xFFDCE1EA) : AppColors.textPrimary,
+          foregroundColor: AppColors.background,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 17),
+          textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
         ),
         onPressed: widget.onPressed,
         icon: Icon(widget.icon, size: 24),
@@ -526,20 +606,20 @@ class _GlassButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final style = FilledButton.styleFrom(
-      backgroundColor: Colors.white.withValues(alpha: 0.12),
+      backgroundColor: Colors.white.withValues(alpha: 0.09),
       foregroundColor: Colors.white,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: Colors.white.withValues(alpha: 0.18)),
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: Colors.white.withValues(alpha: 0.16)),
       ),
-      padding: EdgeInsets.symmetric(horizontal: label == null ? 16 : 22, vertical: 17),
+      padding: EdgeInsets.symmetric(horizontal: label == null ? 16 : 20, vertical: 17),
       textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
     );
     final button = label == null
         ? FilledButton(style: style, onPressed: onPressed, child: Icon(icon, size: 22))
         : FilledButton.icon(style: style, onPressed: onPressed, icon: Icon(icon, size: 22), label: Text(label!));
     return Glass(
-      radius: 14,
+      radius: 10,
       blur: 16,
       tint: Colors.transparent,
       border: false,
@@ -572,11 +652,10 @@ class _AmbientGlow extends StatelessWidget {
 }
 
 class _HeroPoster extends StatelessWidget {
-  const _HeroPoster({required this.channel, this.width, this.height});
+  const _HeroPoster({required this.channel, required this.height});
 
   final Channel channel;
-  final double? width;
-  final double? height;
+  final double height;
 
   @override
   Widget build(BuildContext context) {
@@ -588,7 +667,6 @@ class _HeroPoster extends StatelessWidget {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(12),
         child: SizedBox(
-          width: width,
           height: height,
           child: AspectRatio(
             aspectRatio: PosterCard.aspectRatio,
@@ -673,7 +751,7 @@ class CategoryRow extends ConsumerWidget {
     final category = this.category;
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 22),
+      padding: const EdgeInsets.only(bottom: 28),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -687,7 +765,7 @@ class CategoryRow extends ConsumerWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w700, letterSpacing: -0.2),
+                        ?.copyWith(fontSize: 20, fontWeight: FontWeight.w700, letterSpacing: -0.4),
                   ),
                 ),
                 if (category != null)
@@ -707,7 +785,7 @@ class CategoryRow extends ConsumerWidget {
               padding: EdgeInsets.only(left: left, right: horizontalPadding, top: 8, bottom: 4),
               clipBehavior: Clip.none,
               itemCount: visible.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 14),
+              separatorBuilder: (_, _) => const SizedBox(width: 18),
               itemBuilder: (context, i) => PosterCard(channel: visible[i], queue: channels, width: posterWidth),
             ),
           ),

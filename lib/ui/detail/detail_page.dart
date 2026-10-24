@@ -7,6 +7,8 @@ import '../../models/channel.dart';
 import '../../models/channel_name.dart';
 import '../../models/content_type.dart';
 import '../../providers/app_providers.dart';
+import '../../providers/imdb_providers.dart';
+import '../../services/personal_library.dart';
 import '../browse/browse_view.dart';
 import '../browse/poster_card.dart';
 import '../theme.dart';
@@ -45,6 +47,7 @@ class _DetailPageState extends ConsumerState<DetailPage> {
     final detailsAsync = ref.watch(mediaDetailsProvider(channel));
     final details = detailsAsync.value ?? MediaDetails.empty;
     final isFavorite = ref.watch(favoritesProvider.select((f) => f.contains(channel)));
+    final feedback = ref.watch(recommendationFeedbackProvider(channel));
     final hPad = compact ? 16.0 : 40.0;
     final textTheme = Theme.of(context).textTheme;
     final isSeries = channel.type == ContentType.series && !channel.isPlayable;
@@ -59,7 +62,8 @@ class _DetailPageState extends ConsumerState<DetailPage> {
     final hasTmdbKey = ref.watch(tmdbApiProvider) != null;
     final tmdbAsync = ref.watch(tmdbTitleProvider(channel));
     final tmdb = tmdbAsync.value;
-    final year = name.year ?? int.tryParse(details.year ?? '') ?? tmdb?.year;
+    final matchedMovie = ref.watch(imdbCatalogProvider).value?.match(channel);
+    final year = name.year ?? channel.year ?? int.tryParse(details.year ?? '') ?? tmdb?.year ?? matchedMovie?.year;
     final rating = (tmdb?.rating ?? 0) > 0 ? tmdb!.rating : details.rating;
     // Deutsche TMDB-Handlung vor der des Anbieters (oft englisch), englische TMDB-Handlung zuletzt.
     final germanOverview = tmdb != null && tmdb.overviewIsGerman ? tmdb.overview : null;
@@ -67,13 +71,26 @@ class _DetailPageState extends ConsumerState<DetailPage> {
     final backdrop = details.backdrop ?? tmdb?.backdrop;
     final poster = channel.logo ?? tmdb?.poster;
     final meta = [
-      details.genre ?? (tmdb != null && tmdb.genres.isNotEmpty ? tmdb.genres.take(3).join(', ') : null),
+      details.genre ??
+          (tmdb != null && tmdb.genres.isNotEmpty
+              ? tmdb.genres.take(3).join(', ')
+              : matchedMovie?.genres.take(3).join(', ')),
       details.duration ?? tmdb?.runtimeLabel,
       if (rating != null && rating > 0) '★ ${rating.toStringAsFixed(1)}${tmdb?.rating == rating ? ' TMDB' : ''}',
     ].nonNulls.toList();
     // TMDB-Empfehlungen, die in der Playlist stecken; sonst dieselbe Kategorie.
     final recommended = tmdb == null ? const <Channel>[] : availableRecommendations(ref, tmdb.recommendations);
-    final moreLikeThis = recommended.length >= 3 ? recommended.where((c) => c != channel).take(20).toList() : similar;
+    final language = ref.watch(languageFilterProvider);
+    final languageIndex = ref.watch(languageIndexProvider(channel.type));
+    final moreLikeThis = (recommended.length >= 3 ? recommended : similar)
+        .where(
+          (c) =>
+              c != channel &&
+              languageIndex.matches(c, language) &&
+              ref.watch(recommendationFeedbackProvider(c)) != FeedbackChoice.hide,
+        )
+        .take(20)
+        .toList();
 
     void play() {
       if (isSeries) {
@@ -148,6 +165,39 @@ class _DetailPageState extends ConsumerState<DetailPage> {
               icon: Icon(isFavorite ? Icons.check_rounded : Icons.add_rounded),
               label: Text(isFavorite ? 'In meiner Liste' : 'Meine Liste'),
             ),
+            for (final option in [FeedbackChoice.like, FeedbackChoice.hide])
+              Semantics(
+                selected: feedback == option,
+                child: OutlinedButton.icon(
+                  key: ValueKey('feedback-${option.name}'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    backgroundColor: feedback == option ? const Color(0x334A90E2) : null,
+                    minimumSize: Size(compact ? double.infinity : 0, 48),
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    side: BorderSide(color: feedback == option ? Colors.white : const Color(0x66FFFFFF)),
+                  ),
+                  onPressed: () async {
+                    try {
+                      await ref.read(personalLibraryProvider.notifier).toggleFeedback(channel, option);
+                    } catch (_) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Deine Auswahl konnte nicht dauerhaft gespeichert werden.')),
+                        );
+                      }
+                    }
+                  },
+                  icon: Icon(
+                    feedback == option
+                        ? Icons.check_rounded
+                        : option == FeedbackChoice.like
+                        ? Icons.thumb_up_outlined
+                        : Icons.not_interested_rounded,
+                  ),
+                  label: Text(option == FeedbackChoice.like ? 'Gefällt mir' : 'Nicht interessiert'),
+                ),
+              ),
             if (tmdb?.trailerYoutubeKey != null)
               OutlinedButton.icon(
                 style: OutlinedButton.styleFrom(
@@ -166,6 +216,15 @@ class _DetailPageState extends ConsumerState<DetailPage> {
               ),
           ],
         ),
+        if (feedback != null) ...[
+          const SizedBox(height: 10),
+          Text(
+            feedback == FeedbackChoice.hide
+                ? 'Dieser Titel erscheint nicht in deinen Empfehlungen. Erneut auswählen zum Rückgängigmachen.'
+                : 'Deine Auswahl verbessert deine Empfehlungen. Erneut auswählen zum Rückgängigmachen.',
+            style: textTheme.bodySmall,
+          ),
+        ],
         if (plot != null) ...[
           const SizedBox(height: 20),
           ConstrainedBox(
@@ -273,7 +332,7 @@ class _DetailPageState extends ConsumerState<DetailPage> {
                             ),
                           ),
                           const SizedBox(width: 32),
-                          Expanded(child: info),
+                          Expanded(child: SingleChildScrollView(child: info)),
                         ],
                       ),
                     ),

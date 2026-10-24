@@ -84,6 +84,7 @@ class SeriesAggregator {
             name: m.rest.isNotEmpty ? m.rest : 'Folge $number',
             streamUrl: entry.streamUrl,
             type: ContentType.series,
+            seriesId: 'series:$key',
             logo: entry.logo,
             categoryId: entry.categoryId,
           ),

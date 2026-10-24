@@ -1,0 +1,12 @@
+changelog:
+  categories:
+    - title: Neue Funktionen
+      labels: [enhancement, feature]
+    - title: Fehlerbehebungen
+      labels: [bug]
+    - title: Dokumentation
+      labels: [documentation]
+    - title: Wartung und Abhängigkeiten
+      labels: [dependencies, maintenance]
+    - title: Weitere Änderungen
+      labels: ['*']

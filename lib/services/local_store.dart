@@ -5,9 +5,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/channel.dart';
 import '../models/playlist_credentials.dart';
 import 'secure_store.dart';
+import 'personal_library.dart';
 
-/// Playlists und Favoriten. Unkritisches liegt in SharedPreferences, alle
-/// Zugangsdaten verschlüsselt im [SecureStore].
+/// Playlists, Favoriten und Verlauf. Nur öffentliche Playlist-Metadaten liegen
+/// in SharedPreferences; vollständige Senderdaten liegen im [SecureStore].
 ///
 /// Beim Start lädt [open] alles einmal in den Speicher; danach liest die App
 /// synchron und schreibt in beide Speicher.
@@ -17,6 +18,10 @@ class LocalStore {
   final SharedPreferences _prefs;
   final SecureStore _secure;
   List<PlaylistCredentials> _playlists;
+  final Map<String, List<Channel>> _channels = {};
+  final Map<String, PersonalLibrary> _personal = {};
+  final Map<String, Future<void>> _personalWrites = {};
+  int _personalGeneration = 0;
 
   static const _playlistsKey = 'playlists.v2';
   static const _legacyPlaylistsKey = 'playlists.v1';
@@ -24,6 +29,9 @@ class LocalStore {
   static String _favoritesKey(String playlistId) => 'favorites.v2.$playlistId';
   static String _recentsKey(String playlistId) => 'recents.v1.$playlistId';
   static String _secretKey(String playlistId) => 'playlist.$playlistId';
+  static String _personalKey(String playlistId) => 'personal-library.v1.$playlistId';
+  static String _viewingKey(String playlistId) => 'personal-viewing.v1.$playlistId';
+  static String _recommendationsKey(String playlistId) => 'personal-recommendations.v1.$playlistId';
 
   static Future<LocalStore> open(SharedPreferences prefs, SecureStore secure) async {
     await _migrateLegacy(prefs, secure);
@@ -38,7 +46,25 @@ class LocalStore {
       final secret = await secure.read(_secretKey(json['id'] as String));
       playlists.add(PlaylistCredentials.fromJson({...json, ...?_decode(secret)}));
     }
-    return LocalStore._(prefs, secure, playlists);
+    final store = LocalStore._(prefs, secure, playlists);
+    for (final playlist in playlists) {
+      await store._readChannels(_favoritesKey(playlist.id), playlist);
+      await store._readChannels(_recentsKey(playlist.id), playlist);
+      final parts = <String, dynamic>{};
+      for (final key in [_personalKey(playlist.id), _viewingKey(playlist.id), _recommendationsKey(playlist.id)]) {
+        final raw = await secure.read(key);
+        if (raw == null) continue;
+        try {
+          parts.addAll(jsonDecode(raw) as Map<String, dynamic>);
+        } on FormatException {
+          // A damaged optional history must not prevent the playlist opening.
+        } on TypeError {
+          // Retain the original in the keychain until the next valid write.
+        }
+      }
+      store._personal[playlist.id] = PersonalLibrary.fromJson(parts);
+    }
+    return store;
   }
 
   /// Frühere Versionen speicherten Passwörter im Klartext; sie wandern jetzt
@@ -93,41 +119,117 @@ class LocalStore {
       id == null ? _prefs.remove(_activeKey) : _prefs.setString(_activeKey, id);
 
   /// Favoriten werden komplett gespeichert, damit der Favoriten-Tab ohne
-  /// geladenen Katalog sofort angezeigt werden kann. Zugangsdaten in den
-  /// Stream-URLs werden dabei durch Platzhalter ersetzt.
-  List<Channel> loadFavorites(PlaylistCredentials playlist) => _loadChannels(_favoritesKey(playlist.id), playlist);
+  /// geladenen Katalog sofort angezeigt werden kann. Auch IDs und Logo-URLs
+  /// können Zugangsdaten enthalten, deshalb wird der ganze Eintrag verschlüsselt.
+  List<Channel> loadFavorites(PlaylistCredentials playlist) =>
+      List.unmodifiable(_channels[_favoritesKey(playlist.id)] ?? []);
 
   Future<void> saveFavorites(PlaylistCredentials playlist, List<Channel> favorites) =>
-      _saveChannels(_favoritesKey(playlist.id), playlist, favorites);
+      _saveChannels(_favoritesKey(playlist.id), favorites);
 
-  /// Zuletzt gesehene Live-Sender (neueste zuerst), ebenfalls ohne Zugangsdaten.
-  List<Channel> loadRecents(PlaylistCredentials playlist) => _loadChannels(_recentsKey(playlist.id), playlist);
+  /// Zuletzt gesehene Live-Sender (neueste zuerst), ebenfalls verschlüsselt.
+  List<Channel> loadRecents(PlaylistCredentials playlist) =>
+      List.unmodifiable(_channels[_recentsKey(playlist.id)] ?? []);
 
   Future<void> saveRecents(PlaylistCredentials playlist, List<Channel> recents) =>
-      _saveChannels(_recentsKey(playlist.id), playlist, recents);
+      _saveChannels(_recentsKey(playlist.id), recents);
 
-  List<Channel> _loadChannels(String key, PlaylistCredentials playlist) {
-    final raw = _prefs.getString(key);
-    if (raw == null) return [];
+  Future<void> _readChannels(String key, PlaylistCredentials playlist) async {
+    final protected = await _secure.read(key);
+    final legacy = _prefs.getString(key);
+    final raw = protected ?? legacy;
+    if (raw == null) return;
     final redactor = UrlRedactor.forPlaylist(playlist);
-    return (jsonDecode(raw) as List)
+    final channels = (jsonDecode(raw) as List)
         .cast<Map<String, dynamic>>()
-        .map((json) => Channel.fromJson({...json, 'streamUrl': redactor.restore(json['streamUrl'] as String)}))
+        .map(
+          (json) => Channel.fromJson(
+            protected != null
+                ? json
+                : {
+                    ...json,
+                    'id': redactor.restore(json['id'] as String),
+                    'streamUrl': redactor.restore(json['streamUrl'] as String),
+                  },
+          ),
+        )
         .toList();
+    _channels[key] = channels;
+    if (legacy != null) {
+      // Alte Klartext-IDs erst nach erfolgreichem Schreiben in die Keychain entfernen.
+      if (protected == null) {
+        await _secure.write(key, jsonEncode([for (final channel in channels) channel.toJson()]));
+      }
+      await _prefs.remove(key);
+    }
   }
 
-  Future<void> _saveChannels(String key, PlaylistCredentials playlist, List<Channel> channels) {
-    final redactor = UrlRedactor.forPlaylist(playlist);
-    final json = [
-      for (final c in channels) {...c.toJson(), 'streamUrl': redactor.redact(c.streamUrl)},
-    ];
-    return _prefs.setString(key, jsonEncode(json));
+  Future<void> _saveChannels(String key, List<Channel> channels) async {
+    _channels[key] = List.of(channels);
+    await _secure.write(key, jsonEncode([for (final channel in channels) channel.toJson()]));
+    await _prefs.remove(key);
   }
 
   /// Favoriten und Verlauf einer gelöschten Playlist entfernen.
   Future<void> deleteFavorites(String playlistId) async {
-    await _prefs.remove(_favoritesKey(playlistId));
-    await _prefs.remove(_recentsKey(playlistId));
+    await _personalWrites[playlistId]?.catchError((Object _) {});
+    _personal.remove(playlistId);
+    for (final key in [
+      _favoritesKey(playlistId),
+      _recentsKey(playlistId),
+      _personalKey(playlistId),
+      _viewingKey(playlistId),
+      _recommendationsKey(playlistId),
+    ]) {
+      _channels.remove(key);
+      await _secure.delete(key);
+      await _prefs.remove(key);
+    }
+  }
+
+  PersonalLibrary loadPersonalLibrary(String playlistId) => _personal[playlistId] ?? const PersonalLibrary();
+
+  /// Update in memory atomically, then serialize writes. Playlist identity can
+  /// contain URL credentials, therefore even the identity-only history is kept
+  /// in the keychain, never SharedPreferences.
+  Future<void> updatePersonalLibrary(String playlistId, PersonalLibrary Function(PersonalLibrary) change) {
+    if (!_playlists.any((playlist) => playlist.id == playlistId)) return Future.value();
+    final before = loadPersonalLibrary(playlistId);
+    final after = change(before);
+    if (identical(before, after)) return Future.value();
+    _personal[playlistId] = after;
+    // A large movie baseline is written only when the catalog changes. The
+    // frequent playback flush must serialize only the small viewing totals.
+    final writes = <String, String>{};
+    if (before.hasMovieBaseline != after.hasMovieBaseline || !identical(before.firstSeen, after.firstSeen)) {
+      writes[_personalKey(playlistId)] = jsonEncode({
+        'hasMovieBaseline': after.hasMovieBaseline,
+        'firstSeen': after.firstSeen,
+      });
+    }
+    if (!identical(before.viewing, after.viewing)) {
+      writes[_viewingKey(playlistId)] = jsonEncode({
+        'viewing': {for (final entry in after.viewing.entries) entry.key: entry.value.toJson()},
+      });
+    }
+    if (!identical(before.feedback, after.feedback) ||
+        !identical(before.vodViewing, after.vodViewing) ||
+        !identical(before.metadata, after.metadata)) {
+      writes[_recommendationsKey(playlistId)] = jsonEncode({
+        'metadata': {for (final entry in after.metadata.entries) entry.key: entry.value.toJson()},
+        'feedback': {for (final entry in after.feedback.entries) entry.key: entry.value.toJson()},
+        'vodViewing': {for (final entry in after.vodViewing.entries) entry.key: entry.value.toJson()},
+      });
+    }
+    final generation = _personalGeneration;
+    final write = (_personalWrites[playlistId] ?? Future<void>.value()).catchError((Object _) {}).then((_) async {
+      if (generation != _personalGeneration || !_playlists.any((playlist) => playlist.id == playlistId)) return;
+      for (final entry in writes.entries) {
+        await _secure.write(entry.key, entry.value);
+      }
+    });
+    _personalWrites[playlistId] = write;
+    return write;
   }
 
   static const _tmdbKey = 'tmdb.apiKey';
@@ -140,7 +242,12 @@ class LocalStore {
 
   /// Panik-Knopf: entfernt Playlists, Favoriten, Einstellungen und Schlüsselbund.
   Future<void> wipe() async {
+    _personalGeneration++;
     _playlists = [];
+    _channels.clear();
+    _personal.clear();
+    await Future.wait(_personalWrites.values.map((write) => write.catchError((Object _) {})));
+    _personalWrites.clear();
     await _prefs.clear();
     await _secure.deleteAll();
   }

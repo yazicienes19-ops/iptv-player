@@ -8,6 +8,7 @@ import '../models/epg_item.dart';
 import '../models/playlist_credentials.dart';
 import 'http_client.dart';
 import 'network_security.dart';
+import 'personal_library.dart';
 
 class XtreamException implements Exception {
   const XtreamException(this.message);
@@ -131,6 +132,7 @@ class XtreamApi {
               name: title?.isNotEmpty == true ? title! : 'Folge $episodeNum',
               streamUrl: '$_server/series/$_user/$_pass/$id.$ext',
               type: ContentType.series,
+              seriesId: series.id,
               logo: _text(epInfo['movie_image']) ?? series.logo,
             ),
           );
@@ -191,8 +193,23 @@ class XtreamApi {
       categoryId: json['category_id'] == null ? null : '${json['category_id']}',
       epgChannelId: json['epg_channel_id'] as String?,
       xtreamStreamId: id,
+      imdbId: _text(json['imdb_id'] ?? json['imdb']),
+      year: int.tryParse(
+        RegExp(r'^(?:18|19|20)\d{2}').stringMatch('${json['year'] ?? json['releaseDate'] ?? json['release_date']}') ??
+            '',
+      ),
+      genres: _textList(json['genre'] ?? json['genres']),
+      cast: _textList(json['cast'] ?? json['actors']),
+      director: _text(json['director']),
+      addedAt: parseAddedAt(json['added'] ?? json['added_at'])?.toIso8601String(),
     );
   }
+
+  static List<String> _textList(Object? value) =>
+      (value is List ? value.map((v) => '$v') : '$value'.split(RegExp(r'[,/|]')))
+          .map((value) => value.trim())
+          .where((value) => value.isNotEmpty && value != 'null')
+          .toList();
 
   static List<Map<String, dynamic>> _asMaps(Object? data) {
     if (data is List) return data.whereType<Map>().map((m) => m.cast<String, dynamic>()).toList();

@@ -5,6 +5,7 @@ import '../../models/channel.dart';
 import '../../models/channel_name.dart';
 import '../../models/content_type.dart';
 import '../../providers/app_providers.dart';
+import '../../providers/imdb_providers.dart';
 import '../theme.dart';
 import '../widgets/glass.dart';
 import 'browse_view.dart';
@@ -17,7 +18,7 @@ class PosterCard extends ConsumerStatefulWidget {
   const PosterCard({super.key, required this.channel, required this.queue, this.width = 140, this.onTap});
 
   static const aspectRatio = 2 / 3;
-  static const radius = 14.0;
+  static const radius = 12.0;
 
   final Channel channel;
   final List<Channel> queue;
@@ -48,6 +49,7 @@ class _PosterCardState extends ConsumerState<PosterCard> {
     final channel = widget.channel;
     final isFavorite = ref.watch(favoritesProvider.select((f) => f.contains(channel)));
     final name = channel.display;
+    final imdb = ref.watch(imdbCatalogProvider).value?.match(channel);
     // M3U-Serien: Staffeln stammen aus der Zusammenfassung beim Einlesen.
     final seasons = channel.isPlayable
         ? null
@@ -66,8 +68,8 @@ class _PosterCardState extends ConsumerState<PosterCard> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               AnimatedScale(
-                scale: _lit ? 1.05 : 1,
-                duration: const Duration(milliseconds: 180),
+                scale: _lit ? 1.035 : 1,
+                duration: const Duration(milliseconds: 220),
                 curve: Curves.easeOut,
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 180),
@@ -75,13 +77,20 @@ class _PosterCardState extends ConsumerState<PosterCard> {
                   foregroundDecoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(PosterCard.radius),
                     border: Border.all(
-                      color: _focused ? Colors.white : Colors.white.withValues(alpha: _lit ? 0.18 : 0.08),
+                      color: _focused ? Colors.white : Colors.white.withValues(alpha: _lit ? 0.3 : 0.08),
                       width: _focused ? 2.5 : 1,
                     ),
                   ),
                   decoration: BoxDecoration(
+                    color: AppColors.surface,
                     borderRadius: BorderRadius.circular(PosterCard.radius),
-                    boxShadow: [if (_lit) const BoxShadow(color: Colors.black87, blurRadius: 18, offset: Offset(0, 8))],
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: _lit ? 0.5 : 0.2),
+                        blurRadius: _lit ? 24 : 12,
+                        offset: const Offset(0, 8),
+                      ),
+                    ],
                   ),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(PosterCard.radius),
@@ -99,15 +108,47 @@ class _PosterCardState extends ConsumerState<PosterCard> {
                               isSeries: channel.type == ContentType.series,
                             ),
                           ),
+                          const DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.center,
+                                end: Alignment.bottomCenter,
+                                colors: [Colors.transparent, Color(0x66090B10)],
+                              ),
+                            ),
+                          ),
                           if (isFavorite)
                             const Positioned(
-                              top: 6,
-                              right: 6,
-                              child: Icon(
-                                Icons.star_rounded,
-                                color: Colors.amber,
-                                size: 18,
-                                shadows: [Shadow(blurRadius: 6)],
+                              top: 8,
+                              right: 8,
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(color: Color(0xD9090B10), shape: BoxShape.circle),
+                                child: Padding(
+                                  padding: EdgeInsets.all(5),
+                                  child: Icon(Icons.check_rounded, color: Colors.white, size: 15),
+                                ),
+                              ),
+                            ),
+                          if (imdb != null)
+                            Positioned(
+                              top: 8,
+                              left: 8,
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  color: const Color(0xF0E6B91E),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                  child: Text(
+                                    'IMDb ${imdb.rating.toStringAsFixed(1)}',
+                                    style: const TextStyle(
+                                      color: Color(0xFF171717),
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 10,
+                                    ),
+                                  ),
+                                ),
                               ),
                             ),
                           if (seasons != null && seasons.isNotEmpty)
@@ -142,8 +183,14 @@ class _PosterCardState extends ConsumerState<PosterCard> {
                                 ),
                               ),
                               child: Align(
-                                alignment: Alignment(0, 0.85),
-                                child: Icon(Icons.play_circle_fill_rounded, size: 34, color: Colors.white),
+                                alignment: Alignment.center,
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(color: Color(0xF2FFFFFF), shape: BoxShape.circle),
+                                  child: Padding(
+                                    padding: EdgeInsets.all(10),
+                                    child: Icon(Icons.arrow_forward_rounded, size: 24, color: AppColors.background),
+                                  ),
+                                ),
                               ),
                             ),
                         ],
@@ -152,7 +199,7 @@ class _PosterCardState extends ConsumerState<PosterCard> {
                   ),
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
               Row(
                 children: [
                   Expanded(
@@ -161,9 +208,9 @@ class _PosterCardState extends ConsumerState<PosterCard> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w500,
-                        color: _lit ? AppColors.textPrimary : AppColors.textSecondary,
+                        fontSize: 13,
+                        fontWeight: _lit ? FontWeight.w700 : FontWeight.w500,
+                        color: AppColors.textPrimary,
                       ),
                     ),
                   ),

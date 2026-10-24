@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 
 import '../models/tmdb.dart';
 import 'http_client.dart';
+import 'imdb_catalog.dart';
 import 'network_security.dart';
 
 class TmdbException implements Exception {
@@ -64,28 +65,26 @@ class TmdbApi {
     }
 
     var results = await run(withYear: year);
-    // Jahresangaben in Playlists weichen oft um ein Jahr ab (Kino- vs. Heimkinostart).
+    // Retry a sparse search without the API year filter, but still require
+    // the same year when resolving identity; never silently choose a remake.
     if (results.isEmpty && year != null) results = await run();
     if (results.isEmpty) return null;
     return pickBestMatch(results, title, year: year);
   }
 
-  /// Bevorzugt exakte Titelgleichheit und passendes Jahr; sonst den ersten Treffer.
-  static TmdbRef pickBestMatch(List<TmdbRef> results, String title, {int? year}) {
-    final wanted = normalizeTitle(title);
-    int score(TmdbRef r) {
-      var points = 0;
-      if (normalizeTitle(r.title) == wanted || normalizeTitle(r.originalTitle ?? '') == wanted) points += 10;
-      if (year != null && r.year != null) {
-        final diff = (r.year! - year).abs();
-        if (diff == 0) points += 5;
-        if (diff == 1) points += 3;
+  /// Match identity conservatively: popularity and result order cannot choose
+  /// between remakes. Unknown/unmatched titles remain without extra metadata.
+  static TmdbRef? pickBestMatch(List<TmdbRef> results, String title, {int? year}) {
+    final wanted = catalogTitleKey(title);
+    final exact = <int, TmdbRef>{};
+    for (final result in results) {
+      if (year != null && result.year != year) continue;
+      if (catalogTitleKey(result.title) != wanted && catalogTitleKey(result.originalTitle ?? '') != wanted) {
+        continue;
       }
-      return points;
+      exact[result.id] = result;
     }
-
-    final ranked = [...results]..sort((a, b) => score(b).compareTo(score(a)));
-    return ranked.first;
+    return exact.length == 1 ? exact.values.single : null;
   }
 
   Future<TmdbTitle> title(int id, TmdbMediaType type) async {

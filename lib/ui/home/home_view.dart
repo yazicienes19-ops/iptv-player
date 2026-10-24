@@ -6,6 +6,7 @@ import '../../models/channel.dart';
 import '../../models/content_type.dart';
 import '../../player/player_controller.dart';
 import '../../providers/app_providers.dart';
+import '../../providers/imdb_providers.dart';
 import '../browse/browse_view.dart';
 import '../widgets/channel_views.dart';
 import '../widgets/common.dart';
@@ -24,6 +25,11 @@ class HomeView extends ConsumerWidget {
     final series = ref.watch(channelsByCategoryProvider(ContentType.series));
     final live = ref.watch(visibleChannelsProvider(ContentType.live)).value ?? const <Channel>[];
     final favorites = ref.watch(favoritesProvider);
+    final imdbRows = ref.watch(imdbRowsProvider);
+    final imdb = ref.watch(imdbCatalogProvider).value;
+    final mostWatched = ref.watch(mostWatchedChannelsProvider);
+    final newMovies = ref.watch(newMoviesProvider);
+    final recommendations = ref.watch(recommendationsProvider);
     final hPad = compact ? 16.0 : 40.0;
     final posterWidth = compact ? 112.0 : 158.0;
 
@@ -70,6 +76,43 @@ class HomeView extends ConsumerWidget {
           const SliverToBoxAdapter(child: SizedBox(height: 32)),
         SliverList.list(
           children: [
+            if (recommendations.channels.isNotEmpty) ...[
+              CategoryRow(
+                title: 'Für dich empfohlen',
+                channels: recommendations.channels,
+                horizontalPadding: hPad,
+                leftInset: leftInset,
+                posterWidth: posterWidth,
+              ),
+              Padding(
+                padding: EdgeInsets.fromLTRB(leftInset + hPad, 0, hPad, 24),
+                child: Text(recommendations.explanation, style: Theme.of(context).textTheme.bodySmall),
+              ),
+            ],
+            if (mostWatched.isNotEmpty)
+              _LiveRow(
+                title: 'Deine meistgesehenen Sender',
+                channels: mostWatched,
+                horizontalPadding: hPad,
+                leftInset: leftInset,
+                cardWidth: compact ? 168 : 220,
+              ),
+            if (newMovies.isNotEmpty) ...[
+              CategoryRow(
+                title: 'Neu in deiner Liste',
+                channels: newMovies,
+                horizontalPadding: hPad,
+                leftInset: leftInset,
+                posterWidth: posterWidth,
+              ),
+              Padding(
+                padding: EdgeInsets.fromLTRB(leftInset + hPad, 0, hPad, 24),
+                child: Text(
+                  'In den letzten 30 Tagen hinzugefügt oder erstmals nach dem ersten Import erkannt.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            ],
             if (favoriteVod.isNotEmpty)
               CategoryRow(
                 title: 'Meine Liste',
@@ -86,6 +129,34 @@ class HomeView extends ConsumerWidget {
                 leftInset: leftInset,
                 cardWidth: compact ? 168 : 220,
               ),
+            if (imdbRows.isNotEmpty) ...[
+              Padding(
+                padding: EdgeInsets.fromLTRB(leftInset + hPad, 0, hPad, 12),
+                child: Text(
+                  'IMDb · ab ${imdb?.minVotes} Stimmen · aus deiner Playlist',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+              CategoryRow(
+                title: 'Beste Filme aller Zeiten · IMDb',
+                channels: imdbRows.take(20).map((row) => row.$1).toList(),
+                horizontalPadding: hPad,
+                leftInset: leftInset,
+                posterWidth: posterWidth,
+              ),
+              if (imdbRows.any((row) => row.$2.genres.contains('Crime')))
+                CategoryRow(
+                  title: 'Beste Krimis aller Zeiten · IMDb',
+                  channels: imdbRows
+                      .where((row) => row.$2.genres.contains('Crime'))
+                      .take(20)
+                      .map((row) => row.$1)
+                      .toList(),
+                  horizontalPadding: hPad,
+                  leftInset: leftInset,
+                  posterWidth: posterWidth,
+                ),
+            ],
             for (final (category, channels) in movieRows.take(3))
               CategoryRow(
                 category: category,

@@ -1,6 +1,6 @@
 {
   "name": "com.enesyazici.ipflix.proxy",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Liefert IpFlix aus und leitet Anfragen ohne CORS-Sperre weiter",
   "main": "proxy.js"
 }

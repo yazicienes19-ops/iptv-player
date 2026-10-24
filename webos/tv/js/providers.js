@@ -103,6 +103,11 @@
       ext: text(json.container_extension) || 'mp4',
       rating: parseFloat(json.rating) || null,
       year: text(json.year) || (text(json.releaseDate) || '').slice(0, 4) || null,
+      addedAt: json.added != null ? json.added : json.added_at,
+      imdbId: text(json.imdb_id || json.imdb),
+      genres: Array.isArray(json.genres) ? json.genres : text(json.genre),
+      director: text(json.director),
+      cast: text(json.cast || json.actors),
       num: json.num,
     };
   };
@@ -165,6 +170,7 @@
       cast: text(info.cast || info.actors),
       director: text(info.director),
       tmdbId: parseInt(info.tmdb_id || info.tmdb, 10) || null,
+      imdbId: text(info.imdb_id || info.imdb) || item.imdbId,
       seasons: [],
     };
   }
@@ -234,6 +240,7 @@
     const sections = { live: newSection(), movie: newSection(), series: newSection() };
     const attr = /([\w-]+)="([^"]*)"/g;
     let pending = null;
+    let extGroup = null;
     let counter = 0;
     content.split(/\r?\n/).forEach((raw) => {
       const line = raw.trim();
@@ -243,15 +250,18 @@
         let m;
         attr.lastIndex = 0;
         while ((m = attr.exec(line))) attrs[m[1].toLowerCase()] = m[2];
-        const comma = line.lastIndexOf(',');
-        pending = { name: (comma >= 0 ? line.slice(comma + 1) : '').trim() || attrs['tvg-name'] || 'Ohne Namen', attrs: attrs };
+        pending = { name: m3uTitle(line) || attrs['tvg-name'] || 'Ohne Namen', attrs: attrs };
+        extGroup = null;
+        return;
+      }
+      if (line.indexOf('#EXTGRP:') === 0) {
+        extGroup = line.slice(8).trim();
         return;
       }
       if (line.charAt(0) === '#' || !pending) return;
-      const lower = line.toLowerCase();
       // Serien in M3U-Listen sind einzelne Folgen; sie werden direkt abgespielt.
-      const section = lower.indexOf('/series/') >= 0 ? 'series' : lower.indexOf('/movie/') >= 0 ? 'movie' : 'live';
-      const group = pending.attrs['group-title'] || 'Ohne Kategorie';
+      const group = pending.attrs['group-title'] || extGroup || 'Ohne Kategorie';
+      const section = m3uSection(line, group);
       const target = sections[section];
       if (!target.byName[group]) {
         target.byName[group] = String(target.categories.length + 1);
@@ -268,6 +278,24 @@
       pending = null;
     });
     return sections;
+  }
+
+  function m3uTitle(line) {
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      if (line.charAt(i) === '"') inQuotes = !inQuotes;
+      else if (line.charAt(i) === ',' && !inQuotes) return line.slice(i + 1).trim();
+    }
+    return '';
+  }
+
+  function m3uSection(address, group) {
+    const lower = address.toLowerCase();
+    if (lower.indexOf('/series/') >= 0) return 'series';
+    if (lower.indexOf('/movie/') >= 0) return 'movie';
+    const category = group.toLowerCase();
+    if (!/^[^?#]*\.(mp4|mkv|avi|mov|m4v|wmv|flv|webm|ogv|mpg|mpeg|m2ts|vob)([?#]|$)/.test(lower) && !/\bvod\b/.test(category)) return 'live';
+    return category.indexOf('serie') >= 0 ? 'series' : 'movie';
   }
 
   function newSection() {

@@ -1,0 +1,47 @@
+/* Suche: große Eingabe, klare Filter, großzügige Cover. Chrome 53 kompatibel. */
+.search-panel { padding: 3rem 3.5rem 0; }
+.search-header { flex-shrink: 0; }
+.search-eyebrow { color: #e7a3ab; font-size: 0.85rem; font-weight: 700; letter-spacing: 0.18rem; }
+.search-title { font-size: 3.2rem; line-height: 1.15; letter-spacing: -0.1rem; margin: 0.8rem 0 1.7rem; }
+.search-input-wrap { display: flex; align-items: center; position: relative; max-width: 75rem; }
+.search-input-wrap > .icon { position: absolute; left: 1.4rem; color: #c9cdd5; width: 1.7rem; height: 1.7rem; }
+.search-field { background: #20242e; border: 0.12rem solid #485160; border-radius: 0.45rem; font-size: 1.5rem; padding: 1.3rem 4rem; margin: 0; max-width: none; }
+.search-field::-webkit-search-cancel-button { display: none; }
+.search-field::placeholder { color: #9aa4b6; }
+.search-clear { position: absolute; right: 0.7rem; color: #e9edf5; background: transparent; border: 0; font-size: 2rem; cursor: pointer; width: 3rem; height: 3rem; }
+.search-help { color: var(--muted); margin: 0.8rem 0 1.5rem; font-size: 1.05rem; }
+.search-chips { position: relative; overflow-x: auto; padding: 0.3rem 0.3rem 0.5rem; margin-left: -0.3rem; margin-bottom: 0.6rem; }
+.search-chip { flex-shrink: 0; padding: 0.65rem 1.25rem; border: 1px solid #38404e; background: transparent; border-radius: 2rem; color: #bac2d0; margin-right: 0.7rem; font-family: inherit; font-size: 1.05rem; cursor: pointer; }
+.search-chip.chosen { color: #11141b; background: #f5f6f8; border-color: #f5f6f8; font-weight: 600; }
+.search-chip.focused, .search-chip:focus { outline: 0.15rem solid var(--accent); outline-offset: 0.1rem; }
+.search-result-head { display: flex; align-items: baseline; justify-content: space-between; margin-top: 1.2rem; flex-shrink: 0; }
+.search-results-title { font-size: 1.55rem; letter-spacing: -0.03rem; margin: 0; }
+.search-count { font-size: 1rem; color: #a7afbd; margin-left: 1rem; white-space: nowrap; }
+.search-source { color: #a7afbd; font-size: 0.95rem; line-height: 1.5; margin: 0.65rem 0 1.3rem; flex-shrink: 0; }
+.search-results { min-height: 10rem; }
+.search-results .grid { left: 0.35rem; right: 0.35rem; overflow: hidden; }
+.search-card-meta { color: #a7afbd; font-size: 0.9rem; margin-top: 0.4rem; height: 1.1rem; flex-shrink: 0; }
+.similar-button { position: absolute; right: 0.75rem; top: 0.75rem; width: 2.5rem; height: 2.5rem; border-radius: 50%; border: 1px solid #6b7485; background: rgba(9, 11, 16, 0.9); color: #fff; font-size: 1.7rem; cursor: pointer; }
+.similar-button:hover, .similar-button:focus { background: #fff; color: #11141b; outline: 0.15rem solid var(--accent); }
+.search-retry { align-self: center; margin-bottom: 1rem; }
+.search-status { top: 15%; font-size: 1.2rem; }
+.imdb-source { color: #e9c568; }
+.metadata-credit { display: block; color: #818b9b; font-size: 0.7rem; padding: 0.5rem 0 0.75rem; text-decoration: none; flex-shrink: 0; }
+.imdb-badge { position: absolute; left: 0.65rem; top: 0.65rem; padding: 0.3rem 0.5rem; border-radius: 0.25rem; background: #e4bd58; color: #17150e; font-size: 0.85rem; font-weight: 700; }
+@media (max-width: 1000px) {
+  .search-panel { padding: 2rem 2rem 0; }
+  .search-title { font-size: 2.6rem; }
+}
+@media (max-width: 600px) {
+  .search-panel { padding: 1.7rem 1rem 0; }
+  .search-title { font-size: 2rem; margin: 0.8rem 0 1.2rem; }
+  .search-eyebrow { font-size: 0.65rem; letter-spacing: 0.1rem; }
+  .search-field { font-size: 1.1rem; padding: 1.1rem 2.5rem 1.1rem 3rem; }
+  .search-input-wrap > .icon { left: 1rem; width: 1.3rem; }
+  .search-clear { width: 2rem; right: 0.2rem; }
+  .search-help { font-size: 0.9rem; margin-bottom: 1rem; }
+  .search-chip { font-size: 0.95rem; padding: 0.55rem 1rem; }
+  .search-results-title { font-size: 1.25rem; }
+  .search-source { font-size: 0.85rem; }
+  .search-results .grid { bottom: 2.2rem; }
+}
