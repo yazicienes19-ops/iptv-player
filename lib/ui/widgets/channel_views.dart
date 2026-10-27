@@ -23,9 +23,16 @@ void openChannel(BuildContext context, WidgetRef ref, Channel channel, List<Chan
   Navigator.of(context).push(DetailPage.route(channel, queue));
 }
 
-/// Startet einen Film oder eine Folge direkt im Vollbild.
-void playFullscreen(BuildContext context, WidgetRef ref, Channel channel, List<Channel> queue) {
-  ref.read(playerControllerProvider.notifier).play(channel, queue: queue);
+/// Startet einen Film oder eine Folge direkt im Vollbild, an der gemerkten
+/// Stelle oder mit [fromStart] von vorne.
+void playFullscreen(
+  BuildContext context,
+  WidgetRef ref,
+  Channel channel,
+  List<Channel> queue, {
+  bool fromStart = false,
+}) {
+  ref.read(playerControllerProvider.notifier).play(channel, queue: queue, fromStart: fromStart);
   Navigator.of(context).push(FullscreenPlayerPage.route());
 }
 

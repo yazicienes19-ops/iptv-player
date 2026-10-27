@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import '../models/catalog.dart';
 import '../models/channel.dart';
 import '../models/content_type.dart';
 
@@ -85,6 +86,26 @@ class VodViewing {
   };
 }
 
+/// Where a film or episode was left off. Finished titles keep a `done` marker
+/// so the series page can continue with the next episode.
+class ResumePoint {
+  const ResumePoint({required this.positionMs, required this.durationMs, required this.at, this.done = false});
+  final int positionMs;
+  final int durationMs;
+  final int at;
+  final bool done;
+
+  Duration get position => Duration(milliseconds: positionMs);
+  Duration get remaining => Duration(milliseconds: math.max(0, durationMs - positionMs));
+  double get fraction => done
+      ? 1
+      : durationMs <= 0
+      ? 0
+      : (positionMs / durationMs).clamp(0, 1).toDouble();
+
+  Map<String, dynamic> toJson() => {'pos': positionMs, 'dur': durationMs, 'at': at, if (done) 'done': true};
+}
+
 /// Personal timestamps, feedback and a bounded cache of structured film metadata.
 /// Display titles and playback URLs always come from the current catalog.
 /// This entire object is stored in SecureStore.
@@ -96,7 +117,11 @@ class PersonalLibrary {
     this.feedback = const {},
     this.vodViewing = const {},
     this.metadata = const {},
+    this.resume = const {},
   });
+
+  /// Höchstens so viele Fortsetzungspunkte; die ältesten fallen heraus.
+  static const maxResumePoints = 400;
 
   final bool hasMovieBaseline;
   final Map<String, int?> firstSeen;
@@ -104,6 +129,7 @@ class PersonalLibrary {
   final Map<String, TitleFeedback> feedback;
   final Map<String, VodViewing> vodViewing;
   final Map<String, TitleMetadata> metadata;
+  final Map<String, ResumePoint> resume;
 
   PersonalLibrary copyWith({
     bool? hasMovieBaseline,
@@ -112,6 +138,7 @@ class PersonalLibrary {
     Map<String, TitleFeedback>? feedback,
     Map<String, VodViewing>? vodViewing,
     Map<String, TitleMetadata>? metadata,
+    Map<String, ResumePoint>? resume,
   }) => PersonalLibrary(
     hasMovieBaseline: hasMovieBaseline ?? this.hasMovieBaseline,
     firstSeen: firstSeen ?? this.firstSeen,
@@ -119,6 +146,7 @@ class PersonalLibrary {
     feedback: feedback ?? this.feedback,
     vodViewing: vodViewing ?? this.vodViewing,
     metadata: metadata ?? this.metadata,
+    resume: resume ?? this.resume,
   );
 
   factory PersonalLibrary.fromJson(Map<String, dynamic> json) {
@@ -177,6 +205,20 @@ class PersonalLibrary {
         );
       }
     }
+    final resume = <String, ResumePoint>{};
+    if (json['resume'] case final Map raw) {
+      for (final entry in raw.entries) {
+        if (entry.key is! String || entry.value is! Map) continue;
+        final data = entry.value as Map;
+        if (data['pos'] is! int || data['dur'] is! int || data['at'] is! int) continue;
+        resume[entry.key as String] = ResumePoint(
+          positionMs: data['pos'] as int,
+          durationMs: data['dur'] as int,
+          at: data['at'] as int,
+          done: data['done'] == true,
+        );
+      }
+    }
     return PersonalLibrary(
       hasMovieBaseline: json['hasMovieBaseline'] == true,
       firstSeen: seen,
@@ -184,6 +226,7 @@ class PersonalLibrary {
       feedback: feedback,
       vodViewing: vodViewing,
       metadata: metadata,
+      resume: resume,
     );
   }
 
@@ -194,7 +237,40 @@ class PersonalLibrary {
     'feedback': {for (final entry in feedback.entries) entry.key: entry.value.toJson()},
     'metadata': {for (final entry in metadata.entries) entry.key: entry.value.toJson()},
     'vodViewing': {for (final entry in vodViewing.entries) entry.key: entry.value.toJson()},
+    'resume': {for (final entry in resume.entries) entry.key: entry.value.toJson()},
   };
+
+  ResumePoint? resumeFor(Channel channel) => resume[personalItemKey(channel)];
+
+  /// Unter 30 s bleibt ein alter Punkt stehen (kurz reingeschaut). Kurz vor dem
+  /// Ende gilt der Titel als gesehen, damit der Abspann nicht als Stelle zählt.
+  PersonalLibrary saveResume(Channel channel, Duration position, Duration duration, DateTime now) {
+    if (channel.type == ContentType.live || !channel.isPlayable || duration <= Duration.zero) return this;
+    final pos = position.inMilliseconds.clamp(0, duration.inMilliseconds);
+    final dur = duration.inMilliseconds;
+    final finished = pos >= dur * 0.95 || dur > 1200000 && dur - pos < 120000;
+    if (!finished && pos < 30000) return this;
+    final key = personalItemKey(channel);
+    final old = resume[key];
+    if (old != null && !finished && !old.done && (old.positionMs - pos).abs() < 1000) return this;
+    final updated = Map<String, ResumePoint>.of(resume)..remove(key);
+    updated[key] = ResumePoint(
+      positionMs: finished ? dur : pos,
+      durationMs: dur,
+      at: now.millisecondsSinceEpoch,
+      done: finished,
+    );
+    while (updated.length > maxResumePoints) {
+      updated.remove(updated.keys.first);
+    }
+    return copyWith(resume: updated);
+  }
+
+  PersonalLibrary clearResume(Channel channel) {
+    final key = personalItemKey(channel);
+    if (!resume.containsKey(key)) return this;
+    return copyWith(resume: Map<String, ResumePoint>.of(resume)..remove(key));
+  }
 
   /// Call only after a successful full movie-catalog load, before filtering.
   /// Unknown-date entries on the first import form a baseline, not a new row.
@@ -352,6 +428,38 @@ class PersonalLibrary {
         .take(limit)
         .toList();
   }
+}
+
+/// Wie es mit einer Serie weitergeht: die zuletzt angefangene Folge, sonst die
+/// Folge nach der zuletzt beendeten. `null`, wenn noch nichts gesehen wurde.
+({Season season, Episode episode, ResumePoint? point})? continueEpisode(PersonalLibrary library, List<Season> seasons) {
+  final order = [
+    for (final season in seasons)
+      for (final episode in season.episodes) (season: season, episode: episode),
+  ];
+  var latest = -1;
+  ResumePoint? latestPoint;
+  for (final (i, item) in order.indexed) {
+    final point = library.resumeFor(item.episode.channel);
+    if (point != null && (latestPoint == null || point.at > latestPoint.at)) {
+      latest = i;
+      latestPoint = point;
+    }
+  }
+  if (latestPoint == null) return null;
+  if (!latestPoint.done) return (season: order[latest].season, episode: order[latest].episode, point: latestPoint);
+  if (latest + 1 >= order.length) return null;
+  final next = order[latest + 1];
+  final nextPoint = library.resumeFor(next.episode.channel);
+  return (season: next.season, episode: next.episode, point: nextPoint?.done == true ? null : nextPoint);
+}
+
+/// „noch 1 Std. 5 Min.“ bzw. „noch 42 Min.“
+String remainingLabel(Duration remaining) {
+  final minutes = math.max(1, (remaining.inSeconds / 60).round());
+  if (minutes < 60) return 'noch $minutes Min.';
+  final rest = minutes % 60;
+  return rest == 0 ? 'noch ${minutes ~/ 60} Std.' : 'noch ${minutes ~/ 60} Std. $rest Min.';
 }
 
 /// Counts advancing playback against a monotonic clock. Pauses, buffering,

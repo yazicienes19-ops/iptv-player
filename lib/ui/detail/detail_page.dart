@@ -92,8 +92,32 @@ class _DetailPageState extends ConsumerState<DetailPage> {
         .take(20)
         .toList();
 
+    final library = ref.watch(personalLibraryProvider);
+    final next = isSeries ? continueEpisode(library, seasons) : null;
+    final movieResume = isSeries ? null : library.resumeFor(channel);
+    final canResume = movieResume != null && !movieResume.done;
+    final String playLabel;
+    if (next != null) {
+      final where =
+          'S${next.season.number} F${next.episode.number > 0 ? next.episode.number : next.season.episodes.indexOf(next.episode) + 1}';
+      playLabel = next.point != null ? '$where fortsetzen' : 'Weiter mit $where';
+    } else {
+      playLabel = isSeries
+          ? 'Folge 1 abspielen'
+          : canResume
+          ? 'Fortsetzen'
+          : 'Abspielen';
+    }
+    final resumeHint = next?.point != null
+        ? remainingLabel(next!.point!.remaining)
+        : canResume
+        ? remainingLabel(movieResume.remaining)
+        : null;
+
     void play() {
-      if (isSeries) {
+      if (next != null) {
+        playFullscreen(context, ref, next.episode.channel, next.season.channels);
+      } else if (isSeries) {
         final first = season?.episodes.firstOrNull;
         if (first != null) playFullscreen(context, ref, first.channel, season!.channels);
       } else {
@@ -137,6 +161,19 @@ class _DetailPageState extends ConsumerState<DetailPage> {
           const SizedBox(height: 10),
           Text(meta.join('  ·  '), style: const TextStyle(color: AppColors.textSecondary)),
         ],
+        if (resumeHint != null) ...[
+          const SizedBox(height: 16),
+          SizedBox(
+            width: compact ? double.infinity : 320,
+            child: Row(
+              children: [
+                Expanded(child: ResumeBar(fraction: (next?.point ?? movieResume)!.fraction)),
+                const SizedBox(width: 12),
+                Text(resumeHint, style: const TextStyle(color: AppColors.textSecondary, fontSize: 13)),
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: 20),
         Wrap(
           spacing: 12,
@@ -152,8 +189,20 @@ class _DetailPageState extends ConsumerState<DetailPage> {
               ),
               onPressed: isSeries && season == null ? null : play,
               icon: const Icon(Icons.play_arrow_rounded),
-              label: Text(isSeries ? 'Folge 1 abspielen' : 'Abspielen'),
+              label: Text(playLabel),
             ),
+            if (canResume)
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  minimumSize: Size(compact ? double.infinity : 0, 48),
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  side: const BorderSide(color: Color(0x66FFFFFF)),
+                ),
+                onPressed: () => playFullscreen(context, ref, channel, widget.queue, fromStart: true),
+                icon: const Icon(Icons.replay_rounded),
+                label: const Text('Von vorne'),
+              ),
             OutlinedButton.icon(
               style: OutlinedButton.styleFrom(
                 foregroundColor: Colors.white,
@@ -432,6 +481,7 @@ class _DetailPageState extends ConsumerState<DetailPage> {
                 separatorBuilder: (_, _) => const Divider(height: 1),
                 itemBuilder: (context, i) => _EpisodeTile(
                   episode: season.episodes[i],
+                  progress: library.resumeFor(season.episodes[i].channel),
                   index: i,
                   compact: compact,
                   onPlay: () => playFullscreen(context, ref, season.episodes[i].channel, season.channels),
@@ -499,10 +549,36 @@ class _DetailPageState extends ConsumerState<DetailPage> {
   }
 }
 
+/// Schmaler Fortschrittsbalken für angefangene Filme und Folgen.
+class ResumeBar extends StatelessWidget {
+  const ResumeBar({super.key, required this.fraction, this.height = 4});
+
+  final double fraction;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) => ClipRRect(
+    borderRadius: BorderRadius.circular(height),
+    child: LinearProgressIndicator(
+      value: fraction,
+      minHeight: height,
+      backgroundColor: const Color(0x55FFFFFF),
+      valueColor: const AlwaysStoppedAnimation(AppColors.accent),
+    ),
+  );
+}
+
 class _EpisodeTile extends StatefulWidget {
-  const _EpisodeTile({required this.episode, required this.index, required this.compact, required this.onPlay});
+  const _EpisodeTile({
+    required this.episode,
+    required this.progress,
+    required this.index,
+    required this.compact,
+    required this.onPlay,
+  });
 
   final Episode episode;
+  final ResumePoint? progress;
   final int index;
   final bool compact;
   final VoidCallback onPlay;
@@ -566,6 +642,24 @@ class _EpisodeTileState extends State<_EpisodeTile> {
                       fit: StackFit.expand,
                       children: [
                         MediaImage(url: episode.channel.logo, cacheWidth: (thumbWidth * 2).round()),
+                        if (widget.progress != null)
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            child: ResumeBar(fraction: widget.progress!.fraction, height: 4),
+                          ),
+                        if (widget.progress?.done == true)
+                          const Positioned(
+                            top: 6,
+                            right: 6,
+                            child: Icon(
+                              Icons.check_circle_rounded,
+                              size: 20,
+                              color: Colors.white,
+                              shadows: [Shadow(blurRadius: 6)],
+                            ),
+                          ),
                         Center(
                           child: AnimatedOpacity(
                             opacity: _lit || widget.compact ? 1 : 0,

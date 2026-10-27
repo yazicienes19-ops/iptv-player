@@ -11,6 +11,7 @@ import '../../models/channel_name.dart';
 import '../../models/content_type.dart';
 import '../../providers/app_providers.dart';
 import '../../providers/imdb_providers.dart';
+import '../../services/personal_library.dart';
 import '../detail/detail_page.dart';
 import '../theme.dart';
 import '../widgets/channel_views.dart';
@@ -490,9 +491,12 @@ class HeroBanner extends ConsumerWidget {
     );
   }
 
-  /// Filme direkt abspielen; Serien ab Staffel 1, Folge 1 (sonst Detailseite).
+  /// Filme direkt abspielen; Serien dort, wo man aufgehört hat, sonst ab
+  /// Staffel 1, Folge 1 (ohne Folgen die Detailseite).
   void _play(BuildContext context, WidgetRef ref, List<Season> seasons) {
     if (channel.isPlayable) return playFullscreen(context, ref, channel, [channel]);
+    final next = continueEpisode(ref.read(personalLibraryProvider), seasons);
+    if (next != null) return playFullscreen(context, ref, next.episode.channel, next.season.channels);
     final first = seasons.firstOrNull;
     if (first != null && first.episodes.isNotEmpty) {
       return playFullscreen(context, ref, first.episodes.first.channel, first.channels);

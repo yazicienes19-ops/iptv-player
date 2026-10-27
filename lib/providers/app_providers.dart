@@ -629,6 +629,23 @@ class PersonalLibraryNotifier extends Notifier<PersonalLibrary> {
     await write;
   }
 
+  Future<void> saveResume(String playlistId, Channel channel, Duration position, Duration duration) async {
+    final write = _store.updatePersonalLibrary(
+      playlistId,
+      (library) => library.saveResume(channel, position, duration, DateTime.now()),
+    );
+    if (ref.mounted && _playlistId == playlistId) state = _store.loadPersonalLibrary(playlistId);
+    await write;
+  }
+
+  Future<void> clearResume(Channel channel) async {
+    final playlistId = _playlistId;
+    if (playlistId == null) return;
+    final write = _store.updatePersonalLibrary(playlistId, (library) => library.clearResume(channel));
+    state = _store.loadPersonalLibrary(playlistId);
+    await write;
+  }
+
   Future<void> toggleFeedback(Channel channel, FeedbackChoice choice) async {
     final playlistId = _playlistId;
     if (playlistId == null || channel.type == ContentType.live) return;

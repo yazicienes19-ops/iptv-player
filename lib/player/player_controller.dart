@@ -113,6 +113,10 @@ class PlayerController extends Notifier<PlaybackState> {
   bool _acceptStartEvents = false;
   DateTime? _openedAt;
 
+  /// Erst wenn der aktuelle Stream wirklich läuft, ist seine Position eine
+  /// gültige Fortsetzungsstelle (vorher stammt sie vom alten Stream).
+  bool _resumeReady = false;
+
   @override
   PlaybackState build() {
     _personalLibrary = ref.read(personalLibraryProvider.notifier);
@@ -148,6 +152,7 @@ class PlayerController extends Notifier<PlaybackState> {
         if (!playing) {
           _viewingTime.resetSample();
           _flushWatch();
+          _saveResume();
         }
       }),
       player.stream.buffering.listen((buffering) {
@@ -157,7 +162,10 @@ class PlayerController extends Notifier<PlaybackState> {
         }
       }),
       player.stream.completed.listen((done) {
-        if (done && _acceptStartEvents && state.channel?.type != ContentType.live) _flushWatch(reachedEnd: true);
+        if (done && _acceptStartEvents && state.channel?.type != ContentType.live) {
+          _flushWatch(reachedEnd: true);
+          _saveResume(reachedEnd: true);
+        }
         // Ein Live-Stream „endet“ nur, wenn die Verbindung abreißt.
         if (done && _acceptStartEvents && state.channel?.type == ContentType.live) {
           _onError('Der Stream wurde unterbrochen.');
@@ -172,13 +180,17 @@ class PlayerController extends Notifier<PlaybackState> {
     ref.listen(activePlaylistProvider, (before, after) {
       if (before?.id != after?.id && state.channel != null) unawaited(stop());
     });
-    _watchFlushTimer = Timer.periodic(const Duration(seconds: 15), (_) => _flushWatch());
+    _watchFlushTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      _flushWatch();
+      _saveResume();
+    });
 
     // Kein Festplatten-Cache: Stream-Inhalte und -URLs landen nie auf der Platte.
     _setMpvOption('cache-on-disk', 'no');
 
     ref.onDispose(() {
       _flushWatch();
+      _saveResume();
       _watchFlushTimer?.cancel();
       _cancelTimers();
       for (final s in _subscriptions) {
@@ -191,8 +203,12 @@ class PlayerController extends Notifier<PlaybackState> {
     return const PlaybackState();
   }
 
-  Future<void> play(Channel channel, {List<Channel>? queue}) async {
+  /// Filme und Folgen setzen an der gemerkten Stelle fort, außer mit [fromStart].
+  Future<void> play(Channel channel, {List<Channel>? queue, bool fromStart = false}) async {
     if (!channel.isPlayable) return;
+    _saveResume();
+    _resumeReady = false;
+    if (fromStart) await _personalLibrary.clearResume(channel).catchError((Object _) {});
     _flushWatch();
     _viewingTime.resetSample();
     _watchPlaylistId = ref.read(activePlaylistProvider)?.id;
@@ -218,6 +234,8 @@ class PlayerController extends Notifier<PlaybackState> {
 
   Future<void> stop() async {
     _flushWatch();
+    _saveResume();
+    _resumeReady = false;
     _viewingTime.resetSample();
     _watchChannel = null;
     _watchKeys = const [];
@@ -260,7 +278,10 @@ class PlayerController extends Notifier<PlaybackState> {
   Future<void> _open() async {
     _flushWatch();
     _viewingTime.resetSample();
+    _resumeReady = false;
     final channel = state.channel!;
+    final resume = channel.type == ContentType.live ? null : ref.read(personalLibraryProvider).resumeFor(channel);
+    final startAt = resume == null || resume.done ? null : resume.position;
     final session = ++_session;
     _cancelTimers();
     state = state.copyWith(isLoading: true, error: () => null, retryCountdown: () => null);
@@ -286,7 +307,7 @@ class PlayerController extends Notifier<PlaybackState> {
       // stop() setzt Breite und Position zurück, damit alte Werte nicht als Start zählen.
       await player.stop();
       if (session != _session) return;
-      await player.open(Media(stream.url));
+      await player.open(Media(stream.url, start: startAt));
       if (session == _session) {
         _acceptStartEvents = true;
         _openedAt = DateTime.now();
@@ -308,6 +329,8 @@ class PlayerController extends Notifier<PlaybackState> {
   /// Kein automatischer Neuversuch: Erst ein VPN hebt die Sperre auf.
   void _blockByKillSwitch() {
     _flushWatch();
+    _saveResume();
+    _resumeReady = false;
     _viewingTime.resetSample();
     _acceptStartEvents = false;
     _session++;
@@ -325,11 +348,14 @@ class PlayerController extends Notifier<PlaybackState> {
   void _markStarted() {
     if (!_acceptStartEvents || (!state.isLoading && !state.hasError)) return;
     _watchdog?.cancel();
+    _resumeReady = true;
     state = state.copyWith(isLoading: false, error: () => null, retryAttempt: 0, retryCountdown: () => null);
   }
 
   void _onError(String message) {
     _flushWatch();
+    _saveResume();
+    _resumeReady = false;
     _viewingTime.resetSample();
     if (state.channel == null || _retryTimer?.isActive == true) return;
     _watchdog?.cancel();
@@ -388,6 +414,16 @@ class PlayerController extends Notifier<PlaybackState> {
                     player.state.position.inMilliseconds >= player.state.duration.inMilliseconds * 0.95,
           );
     unawaited(write.catchError((Object _) {}));
+  }
+
+  void _saveResume({bool reachedEnd = false}) {
+    final channel = state.channel;
+    final playlistId = _watchPlaylistId;
+    final duration = player.state.duration;
+    if (!_resumeReady || channel == null || playlistId == null || channel.type == ContentType.live) return;
+    if (duration <= Duration.zero) return;
+    final position = reachedEnd ? duration : player.state.position;
+    unawaited(_personalLibrary.saveResume(playlistId, channel, position, duration).catchError((Object _) {}));
   }
 
   static String _describe(String raw) {

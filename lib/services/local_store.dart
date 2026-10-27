@@ -32,6 +32,7 @@ class LocalStore {
   static String _personalKey(String playlistId) => 'personal-library.v1.$playlistId';
   static String _viewingKey(String playlistId) => 'personal-viewing.v1.$playlistId';
   static String _recommendationsKey(String playlistId) => 'personal-recommendations.v1.$playlistId';
+  static String _resumeKey(String playlistId) => 'personal-resume.v1.$playlistId';
 
   static Future<LocalStore> open(SharedPreferences prefs, SecureStore secure) async {
     await _migrateLegacy(prefs, secure);
@@ -51,7 +52,12 @@ class LocalStore {
       await store._readChannels(_favoritesKey(playlist.id), playlist);
       await store._readChannels(_recentsKey(playlist.id), playlist);
       final parts = <String, dynamic>{};
-      for (final key in [_personalKey(playlist.id), _viewingKey(playlist.id), _recommendationsKey(playlist.id)]) {
+      for (final key in [
+        _personalKey(playlist.id),
+        _viewingKey(playlist.id),
+        _recommendationsKey(playlist.id),
+        _resumeKey(playlist.id),
+      ]) {
         final raw = await secure.read(key);
         if (raw == null) continue;
         try {
@@ -180,6 +186,7 @@ class LocalStore {
       _personalKey(playlistId),
       _viewingKey(playlistId),
       _recommendationsKey(playlistId),
+      _resumeKey(playlistId),
     ]) {
       _channels.remove(key);
       await _secure.delete(key);
@@ -219,6 +226,11 @@ class LocalStore {
         'metadata': {for (final entry in after.metadata.entries) entry.key: entry.value.toJson()},
         'feedback': {for (final entry in after.feedback.entries) entry.key: entry.value.toJson()},
         'vodViewing': {for (final entry in after.vodViewing.entries) entry.key: entry.value.toJson()},
+      });
+    }
+    if (!identical(before.resume, after.resume)) {
+      writes[_resumeKey(playlistId)] = jsonEncode({
+        'resume': {for (final entry in after.resume.entries) entry.key: entry.value.toJson()},
       });
     }
     final generation = _personalGeneration;

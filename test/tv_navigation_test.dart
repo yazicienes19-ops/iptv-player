@@ -17,7 +17,7 @@ class FakePlayerController extends PlayerController {
   PlaybackState build() => const PlaybackState();
 
   @override
-  Future<void> play(Channel channel, {List<Channel>? queue}) async {
+  Future<void> play(Channel channel, {List<Channel>? queue, bool fromStart = false}) async {
     played.add(channel);
     state = PlaybackState(channel: channel, queue: queue ?? const []);
   }
