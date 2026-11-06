@@ -54,7 +54,8 @@ MediaDetails _seriesDetails() => MediaDetails(
           for (final e in [1, 2, 3])
             Episode(
               number: e,
-              plot: 'Jon Arryn, die Hand des Königs, ist tot. König Robert Baratheon plant, seinen ältesten Freund '
+              plot:
+                  'Jon Arryn, die Hand des Königs, ist tot. König Robert Baratheon plant, seinen ältesten Freund '
                   'zu bitten, sein Nachfolger zu werden.',
               duration: '62 Min.',
               airDate: DateTime(2011, 4, 10 + e * 7),
@@ -144,7 +145,7 @@ void main() {
       ],
       channels: [a, b, remake, other],
     );
-    final sources = findAlternativeSources(a, catalog);
+    final sources = findAlternativeSources(a, catalog, CatalogTitleKeys.of(catalog.channels));
     expect(sources.map((s) => s.channel), [b]);
     expect(sources.single.categoryName, '4K Filme');
   });
@@ -188,6 +189,9 @@ void main() {
               ),
             ),
             catalogProvider(ContentType.movie).overrideWith((ref) async => Catalog.empty),
+            // In der App im Hintergrund-Isolate berechnet; im Test direkt.
+            catalogTitleKeysProvider(ContentType.series)
+                .overrideWith((ref) async => CatalogTitleKeys.of([_series, alt])),
           ],
           child: MaterialApp(
             debugShowCheckedModeBanner: false,
@@ -210,10 +214,7 @@ void main() {
       await tester.pumpAndSettle();
 
       if (Platform.environment['DETAIL_SHOTS'] != null) {
-        await expectLater(
-          find.byType(DetailPage),
-          matchesGoldenFile('shots/detail_${size.width.toInt()}_top.png'),
-        );
+        await expectLater(find.byType(DetailPage), matchesGoldenFile('shots/detail_${size.width.toInt()}_top.png'));
         await tester.drag(find.byType(CustomScrollView), Offset(0, -size.height * 0.85));
         await tester.pumpAndSettle();
         await expectLater(

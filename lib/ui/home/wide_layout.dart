@@ -20,7 +20,8 @@ class WideLayout extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final section = ref.watch(sectionProvider);
-    const inset = GlassSidebar.width;
+    // Außer bei Live TV ist die Seitenleiste eingeklappt und klappt nur über dem Inhalt auf.
+    const inset = GlassSidebar.collapsedWidth;
 
     if (section == AppSection.live) {
       // Ohne mittlere Liste: Kategorien links, Kachel-Raster und Player rechts.
@@ -51,7 +52,7 @@ class WideLayout extends ConsumerWidget {
               _ => BrowseView(key: ValueKey(section), type: section.contentType!, leftInset: inset),
             },
           ),
-          const Positioned(left: 0, top: 0, bottom: 0, child: GlassSidebar()),
+          const Positioned(left: 0, top: 0, bottom: 0, child: GlassSidebar(collapsible: true)),
         ],
       ),
     );

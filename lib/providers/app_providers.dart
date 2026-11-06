@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show compute, kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -939,6 +939,15 @@ class PlaylistTitleIndex {
     }
   }
 
+  /// Aus im Hintergrund berechneten Schlüsseln: kein Bereinigen auf dem Hauptthread.
+  PlaylistTitleIndex.fromKeys(Iterable<CatalogTitleKeys> catalogs) {
+    for (final keys in catalogs) {
+      keys.byKey.forEach((key, indexes) {
+        _byTitle.putIfAbsent(key, () => []).addAll(indexes.map((i) => keys.channels[i]));
+      });
+    }
+  }
+
   final _byTitle = <String, List<Channel>>{};
 
   /// Match unique compatible titles; never pick an arbitrary remake when the
@@ -964,9 +973,51 @@ class PlaylistTitleIndex {
 }
 
 final playlistTitleIndexProvider = Provider<PlaylistTitleIndex>((ref) {
-  final movies = ref.watch(catalogProvider(ContentType.movie)).value?.channels ?? const <Channel>[];
-  final series = ref.watch(catalogProvider(ContentType.series)).value?.channels ?? const <Channel>[];
-  return PlaylistTitleIndex([...movies, ...series]);
+  // Solange die Schlüssel noch berechnet werden, gibt es eben noch keine Treffer.
+  return PlaylistTitleIndex.fromKeys([
+    ref.watch(catalogTitleKeysProvider(ContentType.movie)).value ?? CatalogTitleKeys.empty,
+    ref.watch(catalogTitleKeysProvider(ContentType.series)).value ?? CatalogTitleKeys.empty,
+  ]);
+});
+
+/// Bereinigte Titelschlüssel und Jahre eines ganzen Katalogs. Das Bereinigen kostet
+/// bei 20.000 Einträgen fast eine halbe Sekunde, darum einmal pro Katalog im Hintergrund.
+class CatalogTitleKeys {
+  CatalogTitleKeys(this.channels, List<(String, int?)> parsed) : years = [for (final p in parsed) p.$2], byKey = {} {
+    for (var i = 0; i < parsed.length; i++) {
+      final key = parsed[i].$1;
+      if (key.isNotEmpty) byKey.putIfAbsent(key, () => []).add(i);
+    }
+  }
+
+  /// Ohne Isolate (Tests, kleine Listen).
+  factory CatalogTitleKeys.of(List<Channel> channels) =>
+      CatalogTitleKeys(channels, computeTitleKeys([for (final c in channels) c.isSeparator ? '' : c.name]));
+
+  static final empty = CatalogTitleKeys(const [], const []);
+
+  final List<Channel> channels;
+  final List<int?> years;
+  final Map<String, List<int>> byKey;
+}
+
+/// Läuft im Hintergrund-Isolate; leere Namen (Trennzeilen) bekommen keinen Schlüssel.
+List<(String, int?)> computeTitleKeys(List<String> names) => [
+  for (final name in names)
+    if (name.isEmpty)
+      ('', null)
+    else
+      () {
+        final clean = cleanCatalogTitle(name);
+        return (catalogTitleKey(clean.title), clean.year);
+      }(),
+];
+
+final catalogTitleKeysProvider = FutureProvider.family<CatalogTitleKeys, ContentType>((ref, type) async {
+  final catalog = await ref.watch(catalogProvider(type).future);
+  final names = [for (final c in catalog.channels) c.isSeparator ? '' : c.name];
+  final parsed = await compute(computeTitleKeys, names);
+  return CatalogTitleKeys(catalog.channels, parsed);
 });
 
 /// Ein anderer Eintrag der Playlist mit demselben Titel (andere Kategorie, Sprache oder Qualität).
@@ -978,7 +1029,7 @@ class AlternativeSource {
 }
 
 /// Gleicher bereinigter Titel, gleiches Jahr (falls beide eines haben), gleicher Typ.
-List<AlternativeSource> findAlternativeSources(Channel channel, Catalog catalog) {
+List<AlternativeSource> findAlternativeSources(Channel channel, Catalog catalog, CatalogTitleKeys keys) {
   if (channel.isSeparator) return const [];
   final parsed = cleanCatalogTitle(channel.name);
   final key = catalogTitleKey(parsed.title);
@@ -986,19 +1037,19 @@ List<AlternativeSource> findAlternativeSources(Channel channel, Catalog catalog)
   final year = channel.year ?? parsed.year;
   final categories = {for (final c in catalog.categories) c.id: c.name};
   return [
-    for (final other in catalog.channels)
-      if (other != channel && !other.isSeparator && other.type == channel.type)
-        if (catalogTitleKey(cleanCatalogTitle(other.name).title) == key)
-          if (year == null ||
-              (other.year ?? cleanCatalogTitle(other.name).year) == null ||
-              (other.year ?? cleanCatalogTitle(other.name).year) == year)
-            AlternativeSource(channel: other, categoryName: categories[other.categoryId]),
+    for (final i in keys.byKey[key] ?? const <int>[])
+      if (keys.channels[i] != channel && keys.channels[i].type == channel.type)
+        if (year == null ||
+            (keys.channels[i].year ?? keys.years[i]) == null ||
+            (keys.channels[i].year ?? keys.years[i]) == year)
+          AlternativeSource(channel: keys.channels[i], categoryName: categories[keys.channels[i].categoryId]),
   ];
 }
 
 final alternativeSourcesProvider = Provider.family<List<AlternativeSource>, Channel>((ref, channel) {
   final catalog = ref.watch(catalogProvider(channel.type)).value;
-  return catalog == null ? const [] : findAlternativeSources(channel, catalog);
+  final keys = ref.watch(catalogTitleKeysProvider(channel.type)).value;
+  return catalog == null || keys == null ? const [] : findAlternativeSources(channel, catalog, keys);
 });
 
 // ---------------------------------------------------------------------------

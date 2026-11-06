@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -34,6 +36,26 @@ class PosterCard extends ConsumerStatefulWidget {
 class _PosterCardState extends ConsumerState<PosterCard> {
   bool _hovered = false;
   bool _focused = false;
+  Timer? _prefetch;
+
+  @override
+  void dispose() {
+    _prefetch?.cancel();
+    super.dispose();
+  }
+
+  /// Wer kurz auf einem Poster verweilt, will es meist öffnen: Details und TMDB schon laden,
+  /// damit die Detailseite beim Klick fertig ist. Die Ergebnisse bleiben im Speicher.
+  void _startPrefetch() {
+    final channel = widget.channel;
+    if (channel.type == ContentType.live || channel.isSeparator) return;
+    _prefetch?.cancel();
+    _prefetch = Timer(const Duration(milliseconds: 250), () {
+      if (!mounted) return;
+      ref.read(mediaDetailsProvider(channel).future).ignore();
+      ref.read(tmdbTitleProvider(channel).future).ignore();
+    });
+  }
 
   /// Maus darüber oder per Fernbedienung/Tastatur fokussiert.
   bool get _lit => _hovered || _focused;
@@ -41,7 +63,10 @@ class _PosterCardState extends ConsumerState<PosterCard> {
   @override
   Widget build(BuildContext context) => TvFocus(
     onActivate: widget.onTap ?? () => openChannel(context, ref, widget.channel, widget.queue),
-    onFocusChange: (v) => setState(() => _focused = v),
+    onFocusChange: (v) {
+      setState(() => _focused = v);
+      if (v) _startPrefetch();
+    },
     child: _buildTile(context),
   );
 
@@ -58,8 +83,14 @@ class _PosterCardState extends ConsumerState<PosterCard> {
 
     return MouseRegion(
       cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
+      onEnter: (_) {
+        setState(() => _hovered = true);
+        _startPrefetch();
+      },
+      onExit: (_) {
+        _prefetch?.cancel();
+        setState(() => _hovered = false);
+      },
       child: GestureDetector(
         onTap: widget.onTap ?? () => openChannel(context, ref, channel, widget.queue),
         child: SizedBox(
