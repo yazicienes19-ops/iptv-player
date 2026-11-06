@@ -32,8 +32,8 @@ case "$target" in
       flutter build macos --release --build-name="$release_version" --build-number="$build_number"
     app=build/macos/Build/Products/Release/IpFlix.app
     test -d "$app"
-    # Mit festem Zertifikat (GitHub-Secret) signieren: Der Schlüsselbund erkennt jede neue
-    # Version als dieselbe App und fragt nicht nach jedem Update erneut nach dem Passwort.
+    # Mit dem Apple-Development-Zertifikat (GitHub-Secret) signieren: Der Schlüsselbund
+    # erkennt jede neue Version über die Team-ID als dieselbe App und fragt nicht erneut.
     # Ohne Secret (z. B. Pull Requests) bleibt es bei einer Ad-hoc-Signatur.
     if [ -n "${MACOS_SIGNING_P12:-}" ]; then
       keychain="${RUNNER_TEMP:-/tmp}/ipflix-signing.keychain-db"
@@ -53,13 +53,22 @@ case "$target" in
       security import "${RUNNER_TEMP:-/tmp}/ipflix-signing.p12" -k "$keychain" \
         -P "$MACOS_SIGNING_PASSWORD" -T /usr/bin/codesign >/dev/null
       security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
+      # Öffentliches Apple-Zwischenzertifikat, damit codesign die Kette sicher bilden kann.
+      security import scripts/certs/AppleWWDRCAG3.pem -k "$keychain" >/dev/null || true
       # shellcheck disable=SC2086
       security list-keychains -d user -s "$keychain" $original_keychains
-      codesign --force --deep --sign "IpFlix Signatur" --entitlements macos/Runner/Release.entitlements "$app"
-      codesign -d -r- "$app" 2>&1 | grep -q 'certificate root' || {
-        echo "Signatur ohne festes Zertifikat, der Schlüsselbund würde wieder fragen." >&2
+      # Erste Signier-Identität aus dem Secret (Apple Development mit Team-ID).
+      identity=$(security find-identity -p codesigning "$keychain" | awk '/[0-9A-F]{40}/ {print $2; exit}')
+      test -n "$identity"
+      codesign --force --deep --keychain "$keychain" --sign "$identity" \
+        --entitlements macos/Runner/Release.entitlements "$app"
+      # Der Schlüsselbund vertraut den Einträgen über die Team-ID; ohne sie fragt er nach jedem Update.
+      team=$(codesign -dv "$app" 2>&1 | sed -n 's/^TeamIdentifier=//p')
+      if [ -z "$team" ] || [ "$team" = "not set" ]; then
+        echo "Signatur ohne Team-ID, der Schlüsselbund würde nach jedem Update fragen." >&2
         exit 1
-      }
+      fi
+      echo "Signiert mit Team $team"
     else
       codesign --force --deep --sign - --entitlements macos/Runner/Release.entitlements "$app"
     fi
