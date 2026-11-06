@@ -32,7 +32,37 @@ case "$target" in
       flutter build macos --release --build-name="$release_version" --build-number="$build_number"
     app=build/macos/Build/Products/Release/IpFlix.app
     test -d "$app"
-    codesign --force --deep --sign - --entitlements macos/Runner/Release.entitlements "$app"
+    # Mit festem Zertifikat (GitHub-Secret) signieren: Der Schlüsselbund erkennt jede neue
+    # Version als dieselbe App und fragt nicht nach jedem Update erneut nach dem Passwort.
+    # Ohne Secret (z. B. Pull Requests) bleibt es bei einer Ad-hoc-Signatur.
+    if [ -n "${MACOS_SIGNING_P12:-}" ]; then
+      keychain="${RUNNER_TEMP:-/tmp}/ipflix-signing.keychain-db"
+      keychain_password=$(openssl rand -hex 16)
+      original_keychains=$(security list-keychains -d user | tr -d '"' | xargs)
+      cleanup_keychain() {
+        # shellcheck disable=SC2086
+        security list-keychains -d user -s $original_keychains || true
+        security delete-keychain "$keychain" 2>/dev/null || true
+        rm -f "${RUNNER_TEMP:-/tmp}/ipflix-signing.p12"
+      }
+      trap cleanup_keychain EXIT
+      printf '%s' "$MACOS_SIGNING_P12" | base64 --decode > "${RUNNER_TEMP:-/tmp}/ipflix-signing.p12"
+      security create-keychain -p "$keychain_password" "$keychain"
+      security set-keychain-settings -lut 3600 "$keychain"
+      security unlock-keychain -p "$keychain_password" "$keychain"
+      security import "${RUNNER_TEMP:-/tmp}/ipflix-signing.p12" -k "$keychain" \
+        -P "$MACOS_SIGNING_PASSWORD" -T /usr/bin/codesign >/dev/null
+      security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
+      # shellcheck disable=SC2086
+      security list-keychains -d user -s "$keychain" $original_keychains
+      codesign --force --deep --sign "IpFlix Signatur" --entitlements macos/Runner/Release.entitlements "$app"
+      codesign -d -r- "$app" 2>&1 | grep -q 'certificate root' || {
+        echo "Signatur ohne festes Zertifikat, der Schlüsselbund würde wieder fragen." >&2
+        exit 1
+      }
+    else
+      codesign --force --deep --sign - --entitlements macos/Runner/Release.entitlements "$app"
+    fi
     codesign --verify --deep --strict "$app"
     architectures=$(lipo -archs "$app/Contents/MacOS/IpFlix")
     case "$architectures" in
