@@ -267,11 +267,23 @@ Future<void> _rememberRecommendationMetadata(
 ) async {
   if (!ref.mounted || playlistId == null || metadata.isEmpty) return;
   final store = ref.read(localStoreProvider);
-  final before = store.loadPersonalLibrary(playlistId);
-  final after = before.rememberMetadata(channel, metadata);
-  if (identical(before, after)) return;
+  final library = store.loadPersonalLibrary(playlistId);
+  if (identical(library.rememberMetadata(channel, metadata), library)) return;
+  // Nur Titel, die das Geschmacksprofil prägen (gemocht, gesehen, gemerkt), verändern die
+  // Empfehlungen sofort. Alles andere (jedes Öffnen, Vorladen, Banner) wird nur im Speicher
+  // gemerkt und gesammelt gespeichert: Früher kostete das jedes Mal einen Schlüsselbund-
+  // Zugriff plus eine komplette Neuberechnung der Empfehlungen (spürbares Hängen).
+  final keys = recommendationKeys(channel, ref.read(imdbCatalogProvider).value);
+  final shapesProfile =
+      library.feedbackFor(keys)?.choice == FeedbackChoice.like ||
+      library.vodFor(keys)?.meaningful == true ||
+      ref.read(favoritesProvider).contains(channel);
+  if (!shapesProfile) {
+    store.updatePersonalLibraryDeferred(playlistId, (l) => l.rememberMetadata(channel, metadata));
+    return;
+  }
   try {
-    await store.updatePersonalLibrary(playlistId, (library) => library.rememberMetadata(channel, metadata));
+    await store.updatePersonalLibrary(playlistId, (l) => l.rememberMetadata(channel, metadata));
   } catch (_) {
     // Film information stays usable even if optional preference storage fails.
   }
@@ -721,7 +733,14 @@ final recommendationFeedbackProvider = Provider.family<FeedbackChoice?, Channel>
 });
 
 final recommendationsProvider = Provider<Recommendations>((ref) {
-  final library = ref.watch(personalLibraryProvider);
+  // Fortsetzen-Stellen und Sehzeit ändern sich während der Wiedergabe alle 15 s; die
+  // Empfehlungen hängen aber nur an Likes, Infos und daran, was als gesehen zählt.
+  ref.watch(
+    personalLibraryProvider.select(
+      (l) => (l.feedback, l.metadata, l.vodViewing.values.where((v) => v.meaningful).length),
+    ),
+  );
+  final library = ref.read(personalLibraryProvider);
   final imdb = ref.watch(imdbCatalogProvider).value;
   final language = ref.watch(languageFilterProvider);
   final sources = <Channel>[];
@@ -1180,7 +1199,8 @@ List<ContinueItem> continueWatching(
 }
 
 final continueWatchingProvider = Provider<List<ContinueItem>>((ref) {
-  final library = ref.watch(personalLibraryProvider);
+  ref.watch(personalLibraryProvider.select((l) => l.resume));
+  final library = ref.read(personalLibraryProvider);
   final movies = ref.watch(catalogProvider(ContentType.movie)).value?.channels ?? const <Channel>[];
   final series = ref.watch(catalogProvider(ContentType.series)).value?.channels ?? const <Channel>[];
   return continueWatching(library, movies, series);

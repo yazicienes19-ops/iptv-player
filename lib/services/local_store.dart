@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
@@ -25,6 +26,14 @@ class LocalStore {
   final Map<String, PersonalLibrary> _personal = {};
   final Map<String, Future<void>> _personalWrites = {};
   int _personalGeneration = 0;
+
+  /// Playlists, deren Empfehlungs-Infos nur im Speicher geändert wurden.
+  final Set<String> _deferredRecommendations = {};
+  Timer? _deferredFlush;
+
+  /// So lange werden gemerkte Infos gesammelt, bevor sie in einem Rutsch gespeichert werden.
+  /// In Tests verkürzbar.
+  static Duration deferredDelay = const Duration(seconds: 8);
 
   static const _playlistsKey = 'playlists.v2';
   static const _legacyPlaylistsKey = 'playlists.v1';
@@ -182,6 +191,7 @@ class LocalStore {
   /// Favoriten und Verlauf einer gelöschten Playlist entfernen.
   Future<void> deleteFavorites(String playlistId) async {
     await _personalWrites[playlistId]?.catchError((Object _) {});
+    _deferredRecommendations.remove(playlistId);
     _personal.remove(playlistId);
     for (final key in [
       _favoritesKey(playlistId),
@@ -224,12 +234,11 @@ class LocalStore {
     }
     if (!identical(before.feedback, after.feedback) ||
         !identical(before.vodViewing, after.vodViewing) ||
-        !identical(before.metadata, after.metadata)) {
-      writes[_recommendationsKey(playlistId)] = jsonEncode({
-        'metadata': {for (final entry in after.metadata.entries) entry.key: entry.value.toJson()},
-        'feedback': {for (final entry in after.feedback.entries) entry.key: entry.value.toJson()},
-        'vodViewing': {for (final entry in after.vodViewing.entries) entry.key: entry.value.toJson()},
-      });
+        !identical(before.metadata, after.metadata) ||
+        _deferredRecommendations.contains(playlistId)) {
+      // Schreibt auch zurückgestellte Infos gleich mit.
+      _deferredRecommendations.remove(playlistId);
+      writes[_recommendationsKey(playlistId)] = _recommendationsJson(after);
     }
     if (!identical(before.resume, after.resume)) {
       writes[_resumeKey(playlistId)] = jsonEncode({
@@ -247,6 +256,48 @@ class LocalStore {
     return write;
   }
 
+  static String _recommendationsJson(PersonalLibrary library) => jsonEncode({
+    'metadata': {for (final entry in library.metadata.entries) entry.key: entry.value.toJson()},
+    'feedback': {for (final entry in library.feedback.entries) entry.key: entry.value.toJson()},
+    'vodViewing': {for (final entry in library.vodViewing.entries) entry.key: entry.value.toJson()},
+  });
+
+  /// Für häufige, unwichtige Änderungen (Genres/Darsteller beim Öffnen eines Titels):
+  /// sofort im Speicher, gespeichert erst gesammelt nach [deferredDelay]. Jeder
+  /// Schlüsselbund-Zugriff blockiert unter macOS kurz die Oberfläche.
+  void updatePersonalLibraryDeferred(String playlistId, PersonalLibrary Function(PersonalLibrary) change) {
+    if (!_playlists.any((playlist) => playlist.id == playlistId)) return;
+    final before = loadPersonalLibrary(playlistId);
+    final after = change(before);
+    if (identical(before, after)) return;
+    _personal[playlistId] = after;
+    _deferredRecommendations.add(playlistId);
+    _deferredFlush ??= Timer(deferredDelay, () {
+      _deferredFlush = null;
+      unawaited(flushDeferred());
+    });
+  }
+
+  /// Schreibt zurückgestellte Infos jetzt (auch beim Beenden aufrufbar).
+  Future<void> flushDeferred() async {
+    _deferredFlush?.cancel();
+    _deferredFlush = null;
+    final ids = _deferredRecommendations.toList();
+    _deferredRecommendations.clear();
+    final generation = _personalGeneration;
+    for (final playlistId in ids) {
+      final library = _personal[playlistId];
+      if (library == null) continue;
+      final json = _recommendationsJson(library);
+      final write = (_personalWrites[playlistId] ?? Future<void>.value()).catchError((Object _) {}).then((_) async {
+        if (generation != _personalGeneration || !_playlists.any((playlist) => playlist.id == playlistId)) return;
+        await _secure.write(_recommendationsKey(playlistId), json);
+      });
+      _personalWrites[playlistId] = write;
+      await write;
+    }
+  }
+
   static const _tmdbKey = 'tmdb.apiKey';
 
   /// TMDB-Schlüssel; wie Zugangsdaten nur im Schlüsselbund.
@@ -258,6 +309,9 @@ class LocalStore {
   /// Panik-Knopf: entfernt Playlists, Favoriten, Einstellungen und Schlüsselbund.
   Future<void> wipe() async {
     _personalGeneration++;
+    _deferredFlush?.cancel();
+    _deferredFlush = null;
+    _deferredRecommendations.clear();
     _playlists = [];
     _channels.clear();
     _personal.clear();
