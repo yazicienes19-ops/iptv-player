@@ -165,7 +165,8 @@ final _metadataQuality = RegExp(
       continue;
     }
     final quality = RegExp(
-      r'^(?:[([](?:4k|uhd|fhd|hd|sd|2160p|1080p|720p|hevc)[)\]]|(?:4k|uhd|fhd|hd|sd|2160p|1080p|720p|hevc)\s*\|)\s*',
+      // „[4K] Titel“, „4K | Titel“ und „4K - Titel“ (z. B. „DE - 4K - Spider-Man“).
+      r'^(?:[([](?:4k|uhd|fhd|hd|sd|2160p|1080p|720p|hevc)[)\]]|(?:4k|uhd|fhd|hd|sd|2160p|1080p|720p|hevc)\s*(?:\||[-–]\s))\s*',
       caseSensitive: false,
     ).firstMatch(title);
     if (quality == null || quality.end == title.length) break;

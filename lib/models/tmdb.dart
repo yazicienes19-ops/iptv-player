@@ -78,6 +78,54 @@ class TmdbCast {
   }
 }
 
+/// Ein YouTube-Video zum Titel (Trailer, Teaser, Hinter den Kulissen …).
+class TmdbVideo {
+  const TmdbVideo({required this.key, required this.name, required this.type});
+
+  final String key;
+  final String name;
+
+  /// TMDB-Typ wie `Trailer`, `Teaser`, `Featurette`.
+  final String type;
+
+  String get thumbnail => 'https://img.youtube.com/vi/$key/hqdefault.jpg';
+  String get url => 'https://www.youtube.com/watch?v=$key';
+
+  /// Deutsche Bezeichnung für den TMDB-Typ.
+  String get typeLabel => switch (type) {
+    'Trailer' => 'Trailer',
+    'Teaser' => 'Teaser',
+    'Clip' => 'Ausschnitt',
+    'Featurette' => 'Featurette',
+    'Behind the Scenes' => 'Hinter den Kulissen',
+    'Bloopers' => 'Pannen',
+    'Opening Credits' => 'Vorspann',
+    _ => type,
+  };
+
+  static List<TmdbVideo> listFromJson(List<Map<String, dynamic>> raw) {
+    const order = ['Trailer', 'Teaser', 'Clip', 'Featurette', 'Behind the Scenes', 'Opening Credits', 'Bloopers'];
+    int rank(String type) {
+      final i = order.indexOf(type);
+      return i < 0 ? order.length : i;
+    }
+
+    final seen = <String>{};
+    final videos = [
+      for (final v in raw)
+        if (v['site'] == 'YouTube' && _text(v['key']) != null && seen.add(v['key'] as String))
+          TmdbVideo(key: v['key'] as String, name: _text(v['name']) ?? 'Video', type: _text(v['type']) ?? 'Video'),
+    ];
+    // Stabil nach Typ sortieren, Reihenfolge von TMDB innerhalb eines Typs behalten.
+    final indexed = videos.indexed.toList()
+      ..sort((a, b) {
+        final byType = rank(a.$2.type).compareTo(rank(b.$2.type));
+        return byType != 0 ? byType : a.$1.compareTo(b.$1);
+      });
+    return [for (final e in indexed) e.$2];
+  }
+}
+
 /// Ausführliche Infos zu einem Film oder einer Serie.
 class TmdbTitle {
   const TmdbTitle({
@@ -97,6 +145,8 @@ class TmdbTitle {
     this.directors = const [],
     this.cast = const [],
     this.trailerYoutubeKey,
+    this.videos = const [],
+    this.logoPath,
     this.posterPath,
     this.backdropPath,
     this.collectionId,
@@ -129,6 +179,10 @@ class TmdbTitle {
   final List<String> directors;
   final List<TmdbCast> cast;
   final String? trailerYoutubeKey;
+  final List<TmdbVideo> videos;
+
+  /// Schriftzug des Titels als transparentes Bild (deutsch bevorzugt).
+  final String? logoPath;
   final String? posterPath;
   final String? backdropPath;
   final int? collectionId;
@@ -142,6 +196,7 @@ class TmdbTitle {
 
   String? get poster => tmdbImage(posterPath, size: 'w500');
   String? get backdrop => tmdbImage(backdropPath, size: 'w1280');
+  String? get logo => tmdbImage(logoPath, size: 'w500');
 
   /// „2 Std. 32 Min.“
   String? get runtimeLabel {
@@ -160,6 +215,10 @@ class TmdbTitle {
         videos.where((v) => v['site'] == 'YouTube').firstOrNull;
     final collection = json['belongs_to_collection'] as Map<String, dynamic>?;
     final runtimes = json['episode_run_time'];
+    final logos = ((json['images'] as Map?)?['logos'] as List? ?? const []).cast<Map<String, dynamic>>();
+    Map<String, dynamic>? logoIn(String? language) =>
+        logos.where((l) => l['iso_639_1'] == language && _text(l['file_path']) != null).firstOrNull;
+    final logo = logoIn('de') ?? logoIn('en') ?? logoIn(null);
 
     return TmdbTitle(
       id: json['id'] as int,
@@ -187,6 +246,8 @@ class TmdbTitle {
         for (final c in (credits['cast'] as List? ?? const []).take(20)) TmdbCast.fromJson(c as Map<String, dynamic>),
       ],
       trailerYoutubeKey: trailer?['key'] as String?,
+      videos: TmdbVideo.listFromJson(videos),
+      logoPath: _text(logo?['file_path']),
       posterPath: _text(json['poster_path']),
       backdropPath: _text(json['backdrop_path']),
       collectionId: collection?['id'] as int?,

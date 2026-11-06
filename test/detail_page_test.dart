@@ -1,0 +1,235 @@
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:iptv_player/models/catalog.dart';
+import 'package:iptv_player/models/category.dart';
+import 'package:iptv_player/models/channel.dart';
+import 'package:iptv_player/models/content_type.dart';
+import 'package:iptv_player/models/tmdb.dart';
+import 'package:iptv_player/providers/app_providers.dart';
+import 'package:iptv_player/providers/imdb_providers.dart';
+import 'package:iptv_player/services/local_store.dart';
+import 'package:iptv_player/ui/detail/detail_page.dart';
+import 'package:iptv_player/ui/theme.dart';
+
+import 'personal_library_test.dart' show PersonalSecureStore, playlistA;
+import 'recommendations_test.dart' show NoImdb;
+
+Channel _movie(String id, String name, {String? category}) => Channel(
+  id: id,
+  name: name,
+  streamUrl: 'https://example.test/$id.mp4',
+  type: ContentType.movie,
+  categoryId: category,
+);
+
+final _series = Channel(
+  id: 'got',
+  name: 'DE - Game of Thrones (2011)',
+  streamUrl: '',
+  type: ContentType.series,
+  categoryId: 'de',
+);
+
+const _plot =
+    'Die Handlung ist in einer fiktiven Welt angesiedelt und spielt auf den Kontinenten Westeros und Essos. '
+    'In dieser Welt ist die Länge der Sommer und Winter unvorhersehbar und variabel; eine Jahreszeit kann Jahre '
+    'oder sogar Jahrzehnte dauern. Der Handlungsort auf dem Kontinent Westeros ähnelt dabei stark dem '
+    'mittelalterlichen Europa. Die Geschichte spielt am Ende eines langen Sommers und wird in drei '
+    'Handlungssträngen weitgehend parallel erzählt.';
+
+MediaDetails _seriesDetails() => MediaDetails(
+  plot: _plot,
+  genre: 'Sci-Fi & Fantasy, Drama, Action & Adventure',
+  year: '2011',
+  seasons: [
+    for (final s in [1, 2])
+      Season(
+        number: s,
+        episodes: [
+          for (final e in [1, 2, 3])
+            Episode(
+              number: e,
+              plot: 'Jon Arryn, die Hand des Königs, ist tot. König Robert Baratheon plant, seinen ältesten Freund '
+                  'zu bitten, sein Nachfolger zu werden.',
+              duration: '62 Min.',
+              airDate: DateTime(2011, 4, 10 + e * 7),
+              channel: Channel(
+                id: 'ep-$s-$e',
+                name: e == 1 ? 'Der Winter naht' : 'Folge $e',
+                streamUrl: 'https://example.test/ep-$s-$e.mkv',
+                type: ContentType.series,
+                seriesId: 'got',
+              ),
+            ),
+        ],
+      ),
+  ],
+);
+
+TmdbTitle _tmdb() => TmdbTitle.fromJson({
+  'id': 1399,
+  'name': 'Game of Thrones',
+  'first_air_date': '2011-04-17',
+  'last_air_date': '2019-05-19',
+  'vote_average': 8.46,
+  'vote_count': 24500,
+  'genres': [
+    {'name': 'Drama'},
+  ],
+  'aggregate_credits': {
+    'cast': [
+      for (final (n, r) in [
+        ('Peter Dinklage', 'Tyrion Lannister'),
+        ('Kit Harington', 'Jon Snow'),
+        ('Lena Headey', 'Cersei Lannister'),
+        ('Emilia Clarke', 'Daenerys Targaryen'),
+      ])
+        {
+          'id': n.length,
+          'name': n,
+          'roles': [
+            {'character': r},
+          ],
+        },
+    ],
+  },
+  'videos': {
+    'results': [
+      {'site': 'YouTube', 'type': 'Featurette', 'key': 'f1', 'name': 'Inside Game of Thrones'},
+      {'site': 'YouTube', 'type': 'Trailer', 'key': 't1', 'name': 'Official Series Trailer'},
+      {'site': 'Vimeo', 'type': 'Trailer', 'key': 'v1', 'name': 'Nicht YouTube'},
+      {'site': 'YouTube', 'type': 'Opening Credits', 'key': 'o1', 'name': 'Opening Credits'},
+    ],
+  },
+  'images': {
+    'logos': [
+      {'iso_639_1': 'en', 'file_path': '/en.png'},
+      {'iso_639_1': 'de', 'file_path': '/de.png'},
+    ],
+  },
+}, TmdbMediaType.tv);
+
+Future<void> _loadRealFont() async {
+  // Für lesbare Prüfbilder echte Schrift statt Test-Kästchen laden (nur, wenn vorhanden).
+  final file = File('/System/Library/Fonts/Supplemental/Arial.ttf');
+  if (!file.existsSync()) return;
+  final bytes = file.readAsBytesSync();
+  final loader = FontLoader('Roboto')..addFont(Future.value(ByteData.view(bytes.buffer)));
+  await loader.load();
+}
+
+void main() {
+  test('TMDB: deutsches Logo bevorzugt, nur YouTube-Videos, Trailer zuerst', () {
+    final tmdb = _tmdb();
+    expect(tmdb.logo, 'https://image.tmdb.org/t/p/w500/de.png');
+    expect(tmdb.videos.map((v) => v.key), ['t1', 'f1', 'o1']);
+    expect(tmdb.videos.last.typeLabel, 'Vorspann');
+    expect(tmdb.videos.first.thumbnail, 'https://img.youtube.com/vi/t1/hqdefault.jpg');
+  });
+
+  test('Andere Quellen: gleicher Titel in anderen Kategorien, nicht der Titel selbst', () {
+    final a = _movie('a', 'DE - Spider-Man: No Way Home (2021)', category: 'de');
+    final b = _movie('b', 'DE - 4K - Spider-Man: No Way Home (2021)', category: 'uhd');
+    final remake = _movie('c', 'DE - Spider-Man: No Way Home (1990)', category: 'de');
+    final other = _movie('d', 'DE - Spider-Man: Homecoming (2017)', category: 'de');
+    final catalog = Catalog(
+      categories: const [
+        Category(id: 'de', name: 'Deutsche Filme', type: ContentType.movie),
+        Category(id: 'uhd', name: '4K Filme', type: ContentType.movie),
+      ],
+      channels: [a, b, remake, other],
+    );
+    final sources = findAlternativeSources(a, catalog);
+    expect(sources.map((s) => s.channel), [b]);
+    expect(sources.single.categoryName, '4K Filme');
+  });
+
+  for (final size in [const Size(1280, 800), const Size(390, 844)]) {
+    testWidgets('Serien-Detailseite ohne Fehler bei ${size.width.toInt()} px', (tester) async {
+      await _loadRealFont();
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final store = await LocalStore.open(prefs, PersonalSecureStore());
+      await store.savePlaylists([playlistA]);
+      await store.saveActivePlaylistId('a');
+      final alt = Channel(
+        id: 'got-en',
+        name: 'EN - Game of Thrones (2011)',
+        streamUrl: '',
+        type: ContentType.series,
+        categoryId: 'en',
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            sharedPreferencesProvider.overrideWithValue(prefs),
+            localStoreProvider.overrideWithValue(store),
+            imdbCatalogProvider.overrideWith(NoImdb.new),
+            tmdbApiProvider.overrideWithValue(null),
+            tmdbTitleProvider(_series).overrideWith((ref) async => _tmdb()),
+            mediaDetailsProvider(_series).overrideWith((ref) async => _seriesDetails()),
+            catalogProvider(ContentType.series).overrideWith(
+              (ref) async => Catalog(
+                categories: const [
+                  Category(id: 'de', name: 'Deutsche Serien', type: ContentType.series),
+                  Category(id: 'en', name: 'Englische Serien', type: ContentType.series),
+                ],
+                channels: [_series, alt],
+              ),
+            ),
+            catalogProvider(ContentType.movie).overrideWith((ref) async => Catalog.empty),
+          ],
+          child: MaterialApp(
+            debugShowCheckedModeBanner: false,
+            theme: buildAppTheme(),
+            home: DetailPage(channel: _series, queue: [_series]),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.text('Andere Quellen (1)'), findsOneWidget);
+      // Abschnitte entstehen erst beim Hinscrollen.
+      for (final label in ['BEWERTUNGEN', 'BESETZUNG', 'FOLGEN', 'S01E01', 'VIDEOS']) {
+        await tester.scrollUntilVisible(find.text(label), 200, scrollable: find.byType(Scrollable).first);
+      }
+      await tester.drag(find.byType(CustomScrollView), const Offset(0, 4000));
+      await tester.pumpAndSettle();
+
+      if (Platform.environment['DETAIL_SHOTS'] != null) {
+        await expectLater(
+          find.byType(DetailPage),
+          matchesGoldenFile('shots/detail_${size.width.toInt()}_top.png'),
+        );
+        await tester.drag(find.byType(CustomScrollView), Offset(0, -size.height * 0.85));
+        await tester.pumpAndSettle();
+        await expectLater(
+          find.byType(DetailPage),
+          matchesGoldenFile('shots/detail_${size.width.toInt()}_scrolled.png'),
+        );
+      }
+
+      // Staffel wechseln und „Andere Quellen“ öffnen.
+      await tester.scrollUntilVisible(find.text('Staffel 2'), 200, scrollable: find.byType(Scrollable).first);
+      await tester.tap(find.text('Staffel 2'));
+      await tester.pumpAndSettle();
+      expect(find.text('S02E01'), findsOneWidget);
+      await tester.drag(find.byType(CustomScrollView), const Offset(0, 4000));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('other-sources')));
+      await tester.pumpAndSettle();
+      expect(find.text('Englische Serien'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
+}

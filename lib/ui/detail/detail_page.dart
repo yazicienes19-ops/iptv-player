@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -6,6 +8,7 @@ import '../../models/catalog.dart';
 import '../../models/channel.dart';
 import '../../models/channel_name.dart';
 import '../../models/content_type.dart';
+import '../../models/tmdb.dart';
 import '../../providers/app_providers.dart';
 import '../../providers/imdb_providers.dart';
 import '../../services/personal_library.dart';
@@ -14,11 +17,12 @@ import '../browse/poster_card.dart';
 import '../theme.dart';
 import '../widgets/channel_views.dart';
 import '../widgets/glass.dart';
-import 'tmdb_widgets.dart';
 import '../widgets/media_image.dart';
 import '../widgets/tv_focus.dart';
+import 'tmdb_widgets.dart';
 
-/// Detailseite für Filme und Serien im Netflix-Stil.
+/// Detailseite für Filme und Serien: Titelbild über das ganze Fenster, Infos links unten,
+/// darunter Bewertungen, Besetzung, Folgen, Videos und Empfehlungen.
 class DetailPage extends ConsumerStatefulWidget {
   const DetailPage({super.key, required this.channel, required this.queue});
 
@@ -35,21 +39,29 @@ class DetailPage extends ConsumerStatefulWidget {
 
 class _DetailPageState extends ConsumerState<DetailPage> {
   int _seasonIndex = 0;
+  final _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     // Nach verfügbarem Platz statt Fensterbreite (iPad Split View, schmales Mac-Fenster).
-    return LayoutBuilder(builder: (context, constraints) => _build(context, constraints.maxWidth < 700));
+    return LayoutBuilder(
+      builder: (context, constraints) => _build(context, constraints.maxWidth < 700, constraints.maxHeight),
+    );
   }
 
-  Widget _build(BuildContext context, bool compact) {
+  Widget _build(BuildContext context, bool compact, double viewportHeight) {
     final channel = widget.channel;
     final detailsAsync = ref.watch(mediaDetailsProvider(channel));
     final details = detailsAsync.value ?? MediaDetails.empty;
     final isFavorite = ref.watch(favoritesProvider.select((f) => f.contains(channel)));
     final feedback = ref.watch(recommendationFeedbackProvider(channel));
     final hPad = compact ? 16.0 : 40.0;
-    final textTheme = Theme.of(context).textTheme;
     final isSeries = channel.type == ContentType.series && !channel.isPlayable;
     final seasons = details.seasons;
     final season = seasons.isEmpty ? null : seasons[_seasonIndex.clamp(0, seasons.length - 1)];
@@ -57,6 +69,7 @@ class _DetailPageState extends ConsumerState<DetailPage> {
         .where((c) => c.categoryId == channel.categoryId && c != channel)
         .take(20)
         .toList();
+    final alternatives = ref.watch(alternativeSourcesProvider(channel));
 
     final name = channel.display;
     final hasTmdbKey = ref.watch(tmdbApiProvider) != null;
@@ -70,14 +83,12 @@ class _DetailPageState extends ConsumerState<DetailPage> {
     final plot = germanOverview ?? details.plot ?? tmdb?.overview;
     final backdrop = details.backdrop ?? tmdb?.backdrop;
     final poster = channel.logo ?? tmdb?.poster;
-    final meta = [
-      details.genre ??
-          (tmdb != null && tmdb.genres.isNotEmpty
-              ? tmdb.genres.take(3).join(', ')
-              : matchedMovie?.genres.take(3).join(', ')),
-      details.duration ?? tmdb?.runtimeLabel,
-      if (rating != null && rating > 0) '★ ${rating.toStringAsFixed(1)}${tmdb?.rating == rating ? ' TMDB' : ''}',
-    ].nonNulls.toList();
+    final genres =
+        details.genre ??
+        (tmdb != null && tmdb.genres.isNotEmpty
+            ? tmdb.genres.take(4).join(', ')
+            : matchedMovie?.genres.take(3).join(', '));
+    final duration = details.duration ?? tmdb?.runtimeLabel;
     // TMDB-Empfehlungen, die in der Playlist stecken; sonst dieselbe Kategorie.
     final recommended = tmdb == null ? const <Channel>[] : availableRecommendations(ref, tmdb.recommendations);
     final language = ref.watch(languageFilterProvider);
@@ -103,7 +114,7 @@ class _DetailPageState extends ConsumerState<DetailPage> {
       playLabel = next.point != null ? '$where fortsetzen' : 'Weiter mit $where';
     } else {
       playLabel = isSeries
-          ? 'Folge 1 abspielen'
+          ? 'Staffel ${season?.number ?? 1}, Folge 1 abspielen'
           : canResume
           ? 'Fortsetzen'
           : 'Abspielen';
@@ -125,164 +136,60 @@ class _DetailPageState extends ConsumerState<DetailPage> {
       }
     }
 
+    Future<void> toggleFeedback(FeedbackChoice option) async {
+      try {
+        await ref.read(personalLibraryProvider.notifier).toggleFeedback(channel, option);
+      } catch (_) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Deine Auswahl konnte nicht dauerhaft gespeichert werden.')),
+          );
+        }
+      }
+    }
+
+    // --- Infospalte links unten im Titelbild -------------------------------------------
     final info = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(
-          name.title,
-          style: (compact ? textTheme.headlineSmall : textTheme.displaySmall)?.copyWith(
-            fontWeight: FontWeight.w800,
-            height: 1.05,
-            letterSpacing: -0.5,
-          ),
-        ),
-        if (tmdb?.tagline != null) ...[
-          const SizedBox(height: 8),
-          Text(
-            tmdb!.tagline!,
-            style: const TextStyle(fontStyle: FontStyle.italic, color: AppColors.textSecondary, fontSize: 15),
-          ),
+        _TitleArt(logo: tmdb?.logo, title: name.title, compact: compact),
+        if (genres != null && genres.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          Text(genres, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
         ],
-        const SizedBox(height: 12),
+        const SizedBox(height: 8),
         Wrap(
           spacing: 8,
           runSpacing: 6,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
+            if (rating != null && rating > 0) _RatingChip(rating: rating),
             if (year != null)
-              MetaBadge(text: tmdb?.endYear != null && tmdb!.endYear != year ? '$year–${tmdb.endYear}' : '$year'),
+              Text(
+                tmdb?.endYear != null && tmdb!.endYear != year ? '$year–${tmdb.endYear}' : '$year',
+                style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w500),
+              ),
+            if (duration != null) Text(duration, style: const TextStyle(fontSize: 13.5, color: AppColors.textSecondary)),
             if (tmdb?.certification != null) MetaBadge(text: tmdb!.certification!, filled: false),
             for (final q in name.qualities.take(2)) QualityBadge(tag: q),
-            if (isSeries && seasons.isNotEmpty) MetaBadge(text: seasonSummary(seasons), filled: false),
+            if (isSeries && seasons.isNotEmpty)
+              Text(seasonSummary(seasons), style: const TextStyle(fontSize: 13.5, color: AppColors.textSecondary)),
           ],
         ),
-        if (meta.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          Text(meta.join('  ·  '), style: const TextStyle(color: AppColors.textSecondary)),
-        ],
-        if (resumeHint != null) ...[
-          const SizedBox(height: 16),
-          SizedBox(
-            width: compact ? double.infinity : 320,
-            child: Row(
-              children: [
-                Expanded(child: ResumeBar(fraction: (next?.point ?? movieResume)!.fraction)),
-                const SizedBox(width: 12),
-                Text(resumeHint, style: const TextStyle(color: AppColors.textSecondary, fontSize: 13)),
-              ],
-            ),
-          ),
-        ],
-        const SizedBox(height: 20),
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: [
-            FilledButton.icon(
-              style: FilledButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: Colors.black,
-                minimumSize: Size(compact ? double.infinity : 0, 48),
-                padding: const EdgeInsets.symmetric(horizontal: 26),
-                textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
-              ),
-              onPressed: isSeries && season == null ? null : play,
-              icon: const Icon(Icons.play_arrow_rounded),
-              label: Text(playLabel),
-            ),
-            if (canResume)
-              OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.white,
-                  minimumSize: Size(compact ? double.infinity : 0, 48),
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  side: const BorderSide(color: Color(0x66FFFFFF)),
-                ),
-                onPressed: () => playFullscreen(context, ref, channel, widget.queue, fromStart: true),
-                icon: const Icon(Icons.replay_rounded),
-                label: const Text('Von vorne'),
-              ),
-            OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.white,
-                minimumSize: Size(compact ? double.infinity : 0, 48),
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                side: const BorderSide(color: Color(0x66FFFFFF)),
-              ),
-              onPressed: () => ref.read(favoritesProvider.notifier).toggle(channel),
-              icon: Icon(isFavorite ? Icons.check_rounded : Icons.add_rounded),
-              label: Text(isFavorite ? 'In meiner Liste' : 'Meine Liste'),
-            ),
-            for (final option in [FeedbackChoice.like, FeedbackChoice.hide])
-              Semantics(
-                selected: feedback == option,
-                child: OutlinedButton.icon(
-                  key: ValueKey('feedback-${option.name}'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    backgroundColor: feedback == option ? const Color(0x334A90E2) : null,
-                    minimumSize: Size(compact ? double.infinity : 0, 48),
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    side: BorderSide(color: feedback == option ? Colors.white : const Color(0x66FFFFFF)),
-                  ),
-                  onPressed: () async {
-                    try {
-                      await ref.read(personalLibraryProvider.notifier).toggleFeedback(channel, option);
-                    } catch (_) {
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Deine Auswahl konnte nicht dauerhaft gespeichert werden.')),
-                        );
-                      }
-                    }
-                  },
-                  icon: Icon(
-                    feedback == option
-                        ? Icons.check_rounded
-                        : option == FeedbackChoice.like
-                        ? Icons.thumb_up_outlined
-                        : Icons.not_interested_rounded,
-                  ),
-                  label: Text(option == FeedbackChoice.like ? 'Gefällt mir' : 'Nicht interessiert'),
-                ),
-              ),
-            if (tmdb?.trailerYoutubeKey != null)
-              OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.white,
-                  minimumSize: Size(compact ? double.infinity : 0, 48),
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  side: const BorderSide(color: Color(0x66FFFFFF)),
-                ),
-                // Öffnet YouTube im Browser bzw. in der YouTube-App.
-                onPressed: () => launchUrl(
-                  Uri.parse('https://www.youtube.com/watch?v=${tmdb!.trailerYoutubeKey}'),
-                  mode: LaunchMode.externalApplication,
-                ),
-                icon: const Icon(Icons.smart_display_rounded),
-                label: const Text('Trailer'),
-              ),
-          ],
-        ),
-        if (feedback != null) ...[
-          const SizedBox(height: 10),
+        if (tmdb?.tagline != null) ...[
+          const SizedBox(height: 12),
           Text(
-            feedback == FeedbackChoice.hide
-                ? 'Dieser Titel erscheint nicht in deinen Empfehlungen. Erneut auswählen zum Rückgängigmachen.'
-                : 'Deine Auswahl verbessert deine Empfehlungen. Erneut auswählen zum Rückgängigmachen.',
-            style: textTheme.bodySmall,
+            tmdb!.tagline!,
+            style: const TextStyle(fontStyle: FontStyle.italic, color: AppColors.textSecondary, fontSize: 14),
           ),
         ],
         if (plot != null) ...[
-          const SizedBox(height: 20),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 640),
-            child: Text(plot, style: const TextStyle(height: 1.5, color: Color(0xFFD0D3D9))),
-          ),
+          const SizedBox(height: 12),
+          _ExpandablePlot(text: plot, collapsedLines: compact ? 5 : 9),
         ],
         if (tmdb != null && tmdb.directors.isNotEmpty) ...[
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           Text.rich(
             TextSpan(
               children: [
@@ -296,255 +203,743 @@ class _DetailPageState extends ConsumerState<DetailPage> {
             style: const TextStyle(fontSize: 13),
           ),
         ],
-        // Ohne TMDB-Darsteller wenigstens die Besetzung des Anbieters als Text.
-        if (details.cast != null && (tmdb == null || tmdb.cast.isEmpty)) ...[
-          const SizedBox(height: 12),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 640),
-            child: Text.rich(
-              TextSpan(
-                children: [
-                  const TextSpan(
-                    text: 'Besetzung: ',
-                    style: TextStyle(color: AppColors.textSecondary),
-                  ),
-                  TextSpan(text: details.cast),
-                ],
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13),
+        if (resumeHint != null) ...[
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(child: ResumeBar(fraction: (next?.point ?? movieResume)!.fraction)),
+              const SizedBox(width: 12),
+              Text(resumeHint, style: const TextStyle(color: AppColors.textSecondary, fontSize: 13)),
+            ],
+          ),
+        ],
+        const SizedBox(height: 18),
+        _PillButton(
+          key: const ValueKey('detail-play'),
+          label: playLabel,
+          icon: Icons.play_arrow_rounded,
+          primary: true,
+          autofocus: true,
+          onPressed: isSeries && season == null ? null : play,
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            _RoundButton(
+              key: const ValueKey('favorite-toggle'),
+              tooltip: isFavorite ? 'In meiner Liste' : 'Meine Liste',
+              icon: isFavorite ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+              active: isFavorite,
+              onPressed: () => ref.read(favoritesProvider.notifier).toggle(channel),
             ),
+            const SizedBox(width: 10),
+            if (canResume) ...[
+              Expanded(
+                child: _PillButton(
+                  label: 'Von vorne',
+                  icon: Icons.replay_rounded,
+                  onPressed: () => playFullscreen(context, ref, channel, widget.queue, fromStart: true),
+                ),
+              ),
+              const SizedBox(width: 10),
+            ],
+            Expanded(
+              child: _PillButton(
+                key: const ValueKey('other-sources'),
+                label: alternatives.isEmpty ? 'Keine anderen Quellen' : 'Andere Quellen (${alternatives.length})',
+                onPressed: alternatives.isEmpty
+                    ? null
+                    : () => _showAlternatives(context, alternatives, isSeries: isSeries),
+              ),
+            ),
+            const SizedBox(width: 10),
+            for (final option in [FeedbackChoice.like, FeedbackChoice.hide]) ...[
+              Semantics(
+                selected: feedback == option,
+                child: _RoundButton(
+                  key: ValueKey('feedback-${option.name}'),
+                  tooltip: option == FeedbackChoice.like ? 'Gefällt mir' : 'Nicht interessiert',
+                  icon: option == FeedbackChoice.like
+                      ? (feedback == option ? Icons.thumb_up_rounded : Icons.thumb_up_outlined)
+                      : Icons.not_interested_rounded,
+                  active: feedback == option,
+                  onPressed: () => toggleFeedback(option),
+                ),
+              ),
+              if (option == FeedbackChoice.like) const SizedBox(width: 10),
+            ],
+          ],
+        ),
+        if (feedback != null) ...[
+          const SizedBox(height: 10),
+          Text(
+            feedback == FeedbackChoice.hide
+                ? 'Dieser Titel erscheint nicht in deinen Empfehlungen. Erneut auswählen zum Rückgängigmachen.'
+                : 'Deine Auswahl verbessert deine Empfehlungen. Erneut auswählen zum Rückgängigmachen.',
+            style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
           ),
         ],
       ],
     );
 
+    // --- Bewertungen --------------------------------------------------------------------
+    final ratings = <_RatingItem>[
+      if ((tmdb?.rating ?? 0) > 0)
+        _RatingItem('TMDB', '${(tmdb!.rating! * 10).round()} %', const Color(0xFF01B4E4)),
+      if (matchedMovie != null && matchedMovie.rating > 0)
+        _RatingItem('IMDb', matchedMovie.rating.toStringAsFixed(1), const Color(0xFFF5C518)),
+      if ((details.rating ?? 0) > 0) _RatingItem('Anbieter', details.rating!.toStringAsFixed(1), AppColors.accent),
+      if ((tmdb?.voteCount ?? 0) > 0) _RatingItem('Stimmen', _compactCount(tmdb!.voteCount), AppColors.textSecondary),
+    ];
+
+    final sections = <Widget>[
+      if (detailsAsync.isLoading)
+        const Padding(
+          padding: EdgeInsets.all(32),
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      if (detailsAsync.hasError)
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: hPad, vertical: 16),
+          child: Row(
+            children: [
+              const Text('Details konnten nicht geladen werden.', style: TextStyle(color: AppColors.textSecondary)),
+              TextButton(
+                onPressed: () => ref.invalidate(mediaDetailsProvider(channel)),
+                child: const Text('Erneut laden'),
+              ),
+            ],
+          ),
+        ),
+      if (ratings.isNotEmpty) ...[
+        _SectionLabel('Bewertungen', hPad: hPad),
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: hPad),
+          child: Wrap(spacing: 28, runSpacing: 12, children: [for (final r in ratings) _RatingTile(item: r)]),
+        ),
+      ],
+      if (tmdb != null && tmdb.cast.isNotEmpty) ...[
+        _SectionLabel('Besetzung', hPad: hPad),
+        CastRow(cast: tmdb.cast, horizontalPadding: hPad),
+      ] else if (details.cast != null) ...[
+        // Ohne TMDB wenigstens die Besetzung des Anbieters als Text.
+        _SectionLabel('Besetzung', hPad: hPad),
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: hPad),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 720),
+            child: Text(
+              details.cast!,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 13.5, height: 1.4),
+            ),
+          ),
+        ),
+      ],
+      if (isSeries && seasons.isNotEmpty) ...[
+        _SectionLabel('Folgen', hPad: hPad),
+        if (seasons.length > 1)
+          SizedBox(
+            height: 44,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: EdgeInsets.fromLTRB(hPad, 0, hPad, 8),
+              itemCount: seasons.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
+              itemBuilder: (context, i) => GlassPill(
+                label: 'Staffel ${seasons[i].number}',
+                selected: i == _seasonIndex.clamp(0, seasons.length - 1),
+                onTap: () => setState(() => _seasonIndex = i),
+              ),
+            ),
+          ),
+        const SizedBox(height: 6),
+        SizedBox(
+          height: compact ? 128 : 140,
+          child: ListView.separated(
+            key: PageStorageKey('episodes-${season!.number}'),
+            scrollDirection: Axis.horizontal,
+            clipBehavior: Clip.none,
+            padding: EdgeInsets.symmetric(horizontal: hPad),
+            itemCount: season.episodes.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 12),
+            itemBuilder: (context, i) => _EpisodeCard(
+              episode: season.episodes[i],
+              seasonNumber: season.number,
+              progress: library.resumeFor(season.episodes[i].channel),
+              index: i,
+              compact: compact,
+              onPlay: () => playFullscreen(context, ref, season.episodes[i].channel, season.channels),
+            ),
+          ),
+        ),
+      ],
+      if (tmdb != null && tmdb.videos.isNotEmpty) ...[
+        _SectionLabel('Videos', hPad: hPad),
+        SizedBox(
+          height: compact ? 150 : 172,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            clipBehavior: Clip.none,
+            padding: EdgeInsets.symmetric(horizontal: hPad),
+            itemCount: tmdb.videos.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 12),
+            itemBuilder: (context, i) => _VideoCard(video: tmdb.videos[i], width: compact ? 180 : 210),
+          ),
+        ),
+      ],
+      if (tmdb?.collectionId != null)
+        Padding(
+          padding: EdgeInsets.fromLTRB(hPad, 28, hPad, 0),
+          child: CollectionBanner(id: tmdb!.collectionId!, name: tmdb.collectionName ?? 'Filmreihe'),
+        ),
+      if (hasTmdbKey && tmdbAsync.isLoading)
+        const Padding(padding: EdgeInsets.all(24), child: LinearProgressIndicator()),
+      if (moreLikeThis.isNotEmpty) ...[
+        _SectionLabel(recommended.length >= 3 ? 'Empfehlungen' : 'Mehr wie dieses', hPad: hPad),
+        SizedBox(
+          height: (compact ? 112 : 140) / PosterCard.aspectRatio + 40,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            clipBehavior: Clip.none,
+            padding: EdgeInsets.symmetric(horizontal: hPad, vertical: 4),
+            itemCount: moreLikeThis.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 12),
+            itemBuilder: (context, i) => PosterCard(
+              channel: moreLikeThis[i],
+              queue: moreLikeThis,
+              width: compact ? 112 : 140,
+              onTap: () => Navigator.of(context).pushReplacement(DetailPage.route(moreLikeThis[i], moreLikeThis)),
+            ),
+          ),
+        ),
+      ],
+      // Ohne TMDB-Schlüssel fehlen Logo, Besetzung und Videos – kurzer Hinweis, wie man sie bekommt.
+      if (!hasTmdbKey) Padding(padding: EdgeInsets.fromLTRB(hPad, 32, hPad, 0), child: const TmdbHintCard()),
+    ];
+
     return Scaffold(
-      extendBodyBehindAppBar: true,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        leading: Padding(
-          padding: const EdgeInsets.all(6),
-          child: IconButton.filled(
-            style: IconButton.styleFrom(backgroundColor: const Color(0x66000000)),
-            icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
-            onPressed: () => Navigator.of(context).maybePop(),
+      backgroundColor: AppColors.background,
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: _ScrollingBackdrop(
+              controller: _scroll,
+              fadeDistance: viewportHeight * 0.6,
+              backdrop: backdrop,
+              poster: poster,
+              compact: compact,
+            ),
+          ),
+          CustomScrollView(
+            controller: _scroll,
+            slivers: [
+              SliverToBoxAdapter(
+                child: ConstrainedBox(
+                  // Ganzes Fenster hoch; längere Infos dürfen darüber hinaus wachsen.
+                  constraints: BoxConstraints(minHeight: compact ? viewportHeight * 0.85 : viewportHeight - 24),
+                  child: Align(
+                    alignment: Alignment.bottomLeft,
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(hPad, compact ? 160 : 96, hPad, 28),
+                      child: SizedBox(width: compact ? double.infinity : 400, child: info),
+                    ),
+                  ),
+                ),
+              ),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: hPad),
+                  child: Divider(height: 1, color: Colors.white.withValues(alpha: 0.10)),
+                ),
+              ),
+              SliverList.list(children: sections),
+              const SliverToBoxAdapter(child: SizedBox(height: 48)),
+            ],
+          ),
+          Positioned(
+            top: MediaQuery.paddingOf(context).top + 14,
+            right: compact ? 12 : 20,
+            child: _RoundButton(
+              key: const ValueKey('detail-close'),
+              tooltip: 'Schließen',
+              icon: Icons.close_rounded,
+              size: 36,
+              onPressed: () => Navigator.of(context).maybePop(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showAlternatives(
+    BuildContext context,
+    List<AlternativeSource> alternatives, {
+    required bool isSeries,
+  }) {
+    return showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      isScrollControlled: true,
+      constraints: const BoxConstraints(maxWidth: 640),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (sheetContext) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.7),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 18, 20, 4),
+                child: Text('Andere Quellen', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+              ),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+                child: Text(
+                  'Derselbe Titel in anderen Kategorien, Sprachen oder Qualitäten deiner Playlist.',
+                  style: TextStyle(fontSize: 12.5, color: AppColors.textSecondary),
+                ),
+              ),
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.only(bottom: 12),
+                  itemCount: alternatives.length,
+                  itemBuilder: (context, i) {
+                    final source = alternatives[i];
+                    final display = source.channel.display;
+                    return ListTile(
+                      leading: Icon(isSeries ? Icons.video_library_outlined : Icons.play_circle_outline_rounded),
+                      title: Text(source.channel.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                      subtitle: source.categoryName == null
+                          ? null
+                          : Text(source.categoryName!, maxLines: 1, overflow: TextOverflow.ellipsis),
+                      trailing: Wrap(
+                        spacing: 4,
+                        children: [for (final q in display.qualities.take(2)) QualityBadge(tag: q)],
+                      ),
+                      onTap: () {
+                        Navigator.of(sheetContext).pop();
+                        if (isSeries) {
+                          Navigator.of(context).pushReplacement(DetailPage.route(source.channel, widget.queue));
+                        } else {
+                          playFullscreen(context, ref, source.channel, [source.channel]);
+                        }
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
           ),
         ),
       ),
-      body: CustomScrollView(
-        slivers: [
-          SliverToBoxAdapter(
-            child: SizedBox(
-              height: compact ? 300 : 520,
-              child: Stack(
-                fit: StackFit.expand,
+    );
+  }
+}
+
+String _compactCount(int n) =>
+    n >= 1000 ? '${(n / 1000).toStringAsFixed(n >= 10000 ? 0 : 1).replaceAll('.', ',')} Tsd.' : '$n';
+
+/// Titelbild, das beim Scrollen dunkler und unscharf wird.
+class _ScrollingBackdrop extends StatelessWidget {
+  const _ScrollingBackdrop({
+    required this.controller,
+    required this.fadeDistance,
+    required this.backdrop,
+    required this.poster,
+    required this.compact,
+  });
+
+  final ScrollController controller;
+  final double fadeDistance;
+  final String? backdrop;
+  final String? poster;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final image = RepaintBoundary(child: BackdropImage(backdrop: backdrop, poster: poster));
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        ListenableBuilder(
+          listenable: controller,
+          builder: (context, child) {
+            final offset = controller.hasClients ? controller.offset : 0.0;
+            final t = (offset / fadeDistance.clamp(1, double.infinity)).clamp(0.0, 1.0);
+            // In Stufen weichzeichnen, damit nicht jedes Scroll-Pixel einen neuen Filter baut.
+            final sigma = (t * 6).round() * 4.0;
+            final blurred = sigma == 0
+                ? child!
+                : ImageFiltered(
+                    imageFilter: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma, tileMode: TileMode.clamp),
+                    child: child,
+                  );
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                blurred,
+                ColoredBox(color: AppColors.background.withValues(alpha: 0.15 + 0.6 * t)),
+              ],
+            );
+          },
+          child: image,
+        ),
+        // Links dunkel für die Infospalte, unten in den Seitenhintergrund auslaufend.
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [AppColors.background.withValues(alpha: compact ? 0.35 : 0.92), Colors.transparent],
+              stops: const [0.0, 0.62],
+            ),
+          ),
+        ),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Colors.transparent, AppColors.background.withValues(alpha: 0.9)],
+              stops: const [0.45, 1.0],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Schriftzug-Logo von TMDB, sonst der Titel als Text.
+class _TitleArt extends StatelessWidget {
+  const _TitleArt({required this.logo, required this.title, required this.compact});
+
+  final String? logo;
+  final String title;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Text(
+      title,
+      style: (compact ? Theme.of(context).textTheme.headlineSmall : Theme.of(context).textTheme.displaySmall)
+          ?.copyWith(fontWeight: FontWeight.w800, height: 1.05, letterSpacing: -0.5),
+    );
+    if (logo == null) return text;
+    return Semantics(
+      label: title,
+      header: true,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: compact ? 260 : 340, maxHeight: compact ? 90 : 120),
+        child: MediaImage(
+          url: logo,
+          fit: BoxFit.contain,
+          alignment: Alignment.bottomLeft,
+          cacheWidth: 700,
+          placeholder: Align(alignment: Alignment.bottomLeft, child: text),
+        ),
+      ),
+    );
+  }
+}
+
+class _RatingChip extends StatelessWidget {
+  const _RatingChip({required this.rating});
+
+  final double rating;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        '★ ${rating.toStringAsFixed(1).replaceAll('.', ',')}',
+        style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+      ),
+    );
+  }
+}
+
+/// Weiche Glas-Pille; [primary] ist etwas heller.
+class _PillButton extends StatefulWidget {
+  const _PillButton({
+    super.key,
+    required this.label,
+    required this.onPressed,
+    this.icon,
+    this.primary = false,
+    this.autofocus = false,
+  });
+
+  final String label;
+  final IconData? icon;
+  final VoidCallback? onPressed;
+  final bool primary;
+  final bool autofocus;
+
+  @override
+  State<_PillButton> createState() => _PillButtonState();
+}
+
+class _PillButtonState extends State<_PillButton> {
+  bool _hovered = false;
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = widget.onPressed != null;
+    final lit = enabled && (_hovered || _focused);
+    final base = widget.primary ? 0.16 : 0.08;
+    return TvFocus(
+      autofocus: widget.autofocus,
+      onActivate: widget.onPressed,
+      onFocusChange: (v) => setState(() => _focused = v),
+      child: Semantics(
+        button: true,
+        enabled: enabled,
+        label: widget.label,
+        excludeSemantics: true,
+        child: MouseRegion(
+          cursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+          onEnter: (_) => setState(() => _hovered = true),
+          onExit: (_) => setState(() => _hovered = false),
+          child: GestureDetector(
+            onTap: widget.onPressed,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              height: 42,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: lit ? base + 0.10 : base),
+                borderRadius: BorderRadius.circular(21),
+                border: Border.all(
+                  color: _focused ? Colors.white : Colors.white.withValues(alpha: 0.10),
+                  width: _focused ? 2 : 1,
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  BackdropImage(backdrop: backdrop, poster: poster),
-                  const DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [Color(0x330A0C10), Color(0x000A0C10), AppColors.background],
-                        stops: [0, 0.4, 1],
+                  if (widget.icon != null) ...[
+                    Icon(widget.icon, size: 20, color: enabled ? Colors.white : AppColors.textSecondary),
+                    const SizedBox(width: 6),
+                  ],
+                  Flexible(
+                    child: Text(
+                      widget.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                        color: enabled ? Colors.white : AppColors.textSecondary,
                       ),
                     ),
                   ),
-                  if (!compact) ...[
-                    const DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(colors: [Color(0xE60A0C10), Color(0x000A0C10)], stops: [0.1, 0.75]),
-                      ),
-                    ),
-                    Padding(
-                      padding: EdgeInsets.fromLTRB(hPad, 80, hPad, 24),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(10),
-                            child: SizedBox(
-                              width: 220,
-                              child: AspectRatio(
-                                aspectRatio: PosterCard.aspectRatio,
-                                child: MediaImage(
-                                  url: poster,
-                                  placeholder: TitlePlaceholder(
-                                    title: channel.display.title,
-                                    year: channel.display.year,
-                                    isSeries: channel.type == ContentType.series,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 32),
-                          Expanded(child: SingleChildScrollView(child: info)),
-                        ],
-                      ),
-                    ),
-                  ] else
-                    Center(
-                      child: Padding(
-                        padding: const EdgeInsets.only(top: 40),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(10),
-                          child: SizedBox(
-                            width: 140,
-                            child: AspectRatio(
-                              aspectRatio: PosterCard.aspectRatio,
-                              child: MediaImage(
-                                url: poster,
-                                placeholder: TitlePlaceholder(
-                                  title: channel.display.title,
-                                  year: channel.display.year,
-                                  isSeries: channel.type == ContentType.series,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
                 ],
               ),
             ),
           ),
-          if (compact)
-            SliverToBoxAdapter(
-              child: Padding(padding: EdgeInsets.fromLTRB(hPad, 8, hPad, 8), child: info),
-            ),
-          if (detailsAsync.isLoading)
-            const SliverToBoxAdapter(
-              child: Padding(
-                padding: EdgeInsets.all(32),
-                child: Center(child: CircularProgressIndicator()),
-              ),
-            ),
-          if (detailsAsync.hasError)
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: EdgeInsets.symmetric(horizontal: hPad, vertical: 16),
-                child: Row(
-                  children: [
-                    const Text(
-                      'Details konnten nicht geladen werden.',
-                      style: TextStyle(color: AppColors.textSecondary),
-                    ),
-                    TextButton(
-                      onPressed: () => ref.invalidate(mediaDetailsProvider(channel)),
-                      child: const Text('Erneut laden'),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          if (isSeries && seasons.isNotEmpty) ...[
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(hPad, 24, hPad, 8),
-                child: Row(
-                  children: [
-                    Text('Folgen', style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
-                    const SizedBox(width: 12),
-                    Text(
-                      '${season!.episodes.length} in Staffel ${season.number}',
-                      style: const TextStyle(color: AppColors.textSecondary),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            if (seasons.length > 1)
-              SliverToBoxAdapter(
-                child: SizedBox(
-                  height: 52,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    padding: EdgeInsets.fromLTRB(hPad, 4, hPad, 8),
-                    itemCount: seasons.length,
-                    separatorBuilder: (_, _) => const SizedBox(width: 8),
-                    itemBuilder: (context, i) => GlassPill(
-                      label: 'Staffel ${seasons[i].number}',
-                      selected: i == _seasonIndex.clamp(0, seasons.length - 1),
-                      onTap: () => setState(() => _seasonIndex = i),
-                    ),
-                  ),
-                ),
-              ),
-            SliverPadding(
-              padding: EdgeInsets.fromLTRB(hPad, 0, hPad, 40),
-              sliver: SliverList.separated(
-                itemCount: season.episodes.length,
-                separatorBuilder: (_, _) => const Divider(height: 1),
-                itemBuilder: (context, i) => _EpisodeTile(
-                  episode: season.episodes[i],
-                  progress: library.resumeFor(season.episodes[i].channel),
-                  index: i,
-                  compact: compact,
-                  onPlay: () => playFullscreen(context, ref, season.episodes[i].channel, season.channels),
-                ),
-              ),
-            ),
-          ],
-          // TMDB: Darsteller, Reihe – oder ein Hinweis, wie man sie bekommt.
-          if (!hasTmdbKey)
-            SliverToBoxAdapter(
-              child: Padding(padding: EdgeInsets.fromLTRB(hPad, 28, hPad, 0), child: const TmdbHintCard()),
-            ),
-          if (tmdb != null && tmdb.cast.isNotEmpty) ...[
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(hPad, 32, hPad, 8),
-                child: TmdbSectionTitle(isSeries ? 'Besetzung' : 'Darsteller'),
-              ),
-            ),
-            SliverToBoxAdapter(
-              child: CastRow(cast: tmdb.cast, horizontalPadding: hPad),
-            ),
-          ],
-          if (tmdb?.collectionId != null)
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(hPad, 28, hPad, 0),
-                child: CollectionBanner(id: tmdb!.collectionId!, name: tmdb.collectionName ?? 'Filmreihe'),
-              ),
-            ),
-          if (hasTmdbKey && tmdbAsync.isLoading)
-            const SliverToBoxAdapter(
-              child: Padding(padding: EdgeInsets.all(24), child: LinearProgressIndicator()),
-            ),
-          if (moreLikeThis.isNotEmpty) ...[
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(hPad, 32, hPad, 4),
-                child: Text('Mehr wie dieses', style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
-              ),
-            ),
-            SliverToBoxAdapter(
-              child: SizedBox(
-                height: (compact ? 112 : 150) / PosterCard.aspectRatio + 40,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  clipBehavior: Clip.none,
-                  padding: EdgeInsets.symmetric(horizontal: hPad, vertical: 6),
-                  itemCount: moreLikeThis.length,
-                  separatorBuilder: (_, _) => const SizedBox(width: 12),
-                  itemBuilder: (context, i) => PosterCard(
-                    channel: moreLikeThis[i],
-                    queue: moreLikeThis,
-                    width: compact ? 112 : 150,
-                    onTap: () => Navigator.of(context).pushReplacement(DetailPage.route(moreLikeThis[i], moreLikeThis)),
-                  ),
-                ),
-              ),
-            ),
-          ],
-          const SliverToBoxAdapter(child: SizedBox(height: 40)),
-        ],
+        ),
       ),
+    );
+  }
+}
+
+/// Runder Glas-Knopf (Herz, Daumen, Schließen).
+class _RoundButton extends StatefulWidget {
+  const _RoundButton({
+    super.key,
+    required this.icon,
+    required this.tooltip,
+    required this.onPressed,
+    this.active = false,
+    this.size = 42,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onPressed;
+  final bool active;
+  final double size;
+
+  @override
+  State<_RoundButton> createState() => _RoundButtonState();
+}
+
+class _RoundButtonState extends State<_RoundButton> {
+  bool _hovered = false;
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final lit = _hovered || _focused;
+    return Tooltip(
+      message: widget.tooltip,
+      child: TvFocus(
+        onActivate: widget.onPressed,
+        onFocusChange: (v) => setState(() => _focused = v),
+        child: Semantics(
+          button: true,
+          label: widget.tooltip,
+          child: MouseRegion(
+            cursor: SystemMouseCursors.click,
+            onEnter: (_) => setState(() => _hovered = true),
+            onExit: (_) => setState(() => _hovered = false),
+            child: GestureDetector(
+              onTap: widget.onPressed,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                width: widget.size,
+                height: widget.size,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: widget.active
+                      ? Colors.white.withValues(alpha: 0.28)
+                      : Colors.white.withValues(alpha: lit ? 0.18 : 0.08),
+                  border: Border.all(
+                    color: _focused ? Colors.white : Colors.white.withValues(alpha: 0.10),
+                    width: _focused ? 2 : 1,
+                  ),
+                ),
+                child: Icon(
+                  widget.icon,
+                  size: widget.size * 0.48,
+                  color: widget.active && widget.icon == Icons.favorite_rounded ? AppColors.accent : Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Handlung, bei langen Texten mit „Mehr“ aufklappbar.
+class _ExpandablePlot extends StatefulWidget {
+  const _ExpandablePlot({required this.text, required this.collapsedLines});
+
+  final String text;
+  final int collapsedLines;
+
+  @override
+  State<_ExpandablePlot> createState() => _ExpandablePlotState();
+}
+
+class _ExpandablePlotState extends State<_ExpandablePlot> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    const style = TextStyle(height: 1.45, fontSize: 14, color: Color(0xFFE2E5EA));
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final painter = TextPainter(
+          text: TextSpan(text: widget.text, style: style),
+          maxLines: widget.collapsedLines,
+          textDirection: Directionality.of(context),
+          textScaler: MediaQuery.textScalerOf(context),
+        )..layout(maxWidth: constraints.maxWidth);
+        final overflows = painter.didExceedMaxLines;
+        painter.dispose();
+        final text = Text(
+          widget.text,
+          style: style,
+          maxLines: _expanded ? null : widget.collapsedLines,
+          overflow: _expanded ? null : TextOverflow.ellipsis,
+        );
+        if (!overflows) return text;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            text,
+            TextButton(
+              style: TextButton.styleFrom(
+                padding: EdgeInsets.zero,
+                minimumSize: const Size(0, 32),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                alignment: Alignment.centerLeft,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => setState(() => _expanded = !_expanded),
+              child: Text(_expanded ? 'Weniger' : 'Mehr', style: const TextStyle(fontWeight: FontWeight.w700)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// Kleine graue Abschnittsüberschrift in Großbuchstaben.
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel(this.text, {required this.hPad});
+
+  final String text;
+  final double hPad;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(hPad, 26, hPad, 10),
+      child: Semantics(
+        header: true,
+        child: Text(
+          text.toUpperCase(),
+          style: const TextStyle(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.9,
+            color: AppColors.textSecondary,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RatingItem {
+  const _RatingItem(this.source, this.value, this.color);
+
+  final String source;
+  final String value;
+  final Color color;
+}
+
+class _RatingTile extends StatelessWidget {
+  const _RatingTile({required this.item});
+
+  final _RatingItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(color: item.color, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 6),
+            Text(item.source, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+          ],
+        ),
+        const SizedBox(height: 2),
+        Text(item.value, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+      ],
     );
   }
 }
@@ -568,9 +963,11 @@ class ResumeBar extends StatelessWidget {
   );
 }
 
-class _EpisodeTile extends StatefulWidget {
-  const _EpisodeTile({
+/// Waagerechte Folgenkarte: Vorschaubild links, Nummer, Titel, Handlung und Datum rechts.
+class _EpisodeCard extends StatefulWidget {
+  const _EpisodeCard({
     required this.episode,
+    required this.seasonNumber,
     required this.progress,
     required this.index,
     required this.compact,
@@ -578,66 +975,80 @@ class _EpisodeTile extends StatefulWidget {
   });
 
   final Episode episode;
+  final int seasonNumber;
   final ResumePoint? progress;
   final int index;
   final bool compact;
   final VoidCallback onPlay;
 
   @override
-  State<_EpisodeTile> createState() => _EpisodeTileState();
+  State<_EpisodeCard> createState() => _EpisodeCardState();
 }
 
-class _EpisodeTileState extends State<_EpisodeTile> {
+class _EpisodeCardState extends State<_EpisodeCard> {
   bool _hovered = false;
   bool _focused = false;
 
-  /// Maus darüber oder per Fernbedienung/Tastatur fokussiert.
   bool get _lit => _hovered || _focused;
 
-  @override
-  Widget build(BuildContext context) => TvFocus(
-    onActivate: widget.onPlay,
-    onFocusChange: (v) => setState(() => _focused = v),
-    child: FocusRing(visible: _focused, radius: 8, child: _buildTile(context)),
-  );
+  static String _two(int n) => n.toString().padLeft(2, '0');
 
-  Widget _buildTile(BuildContext context) {
+  static const _months = [
+    'Januar',
+    'Februar',
+    'März',
+    'April',
+    'Mai',
+    'Juni',
+    'Juli',
+    'August',
+    'September',
+    'Oktober',
+    'November',
+    'Dezember',
+  ];
+
+  @override
+  Widget build(BuildContext context) {
     final episode = widget.episode;
     final number = episode.number > 0 ? episode.number : widget.index + 1;
-    final thumbWidth = widget.compact ? 128.0 : 168.0;
+    final compact = widget.compact;
+    final thumbWidth = compact ? 120.0 : 196.0;
+    final date = episode.airDate;
+    final footer = [
+      if (date != null) '${date.day}. ${_months[date.month - 1]} ${date.year}',
+      ?episode.duration,
+    ].join(' · ');
 
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      child: InkWell(
-        onTap: widget.onPlay,
-        borderRadius: BorderRadius.circular(8),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
-          decoration: BoxDecoration(
-            color: _lit ? AppColors.surface : Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (!widget.compact)
-                SizedBox(
-                  width: 40,
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 28),
-                    child: Text(
-                      '$number',
-                      style: const TextStyle(fontSize: 22, color: AppColors.textSecondary, fontWeight: FontWeight.w300),
-                    ),
-                  ),
-                ),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(6),
-                child: SizedBox(
-                  width: thumbWidth,
-                  child: AspectRatio(
-                    aspectRatio: 16 / 9,
+    return TvFocus(
+      onActivate: widget.onPlay,
+      onFocusChange: (v) => setState(() => _focused = v),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: GestureDetector(
+          onTap: widget.onPlay,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            width: compact ? 300 : 470,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: _lit ? 0.10 : 0.04),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: _focused ? Colors.white : Colors.white.withValues(alpha: 0.06),
+                width: _focused ? 2 : 1,
+              ),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(9),
+                  child: SizedBox(
+                    width: thumbWidth,
+                    height: double.infinity,
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
@@ -662,13 +1073,13 @@ class _EpisodeTileState extends State<_EpisodeTile> {
                           ),
                         Center(
                           child: AnimatedOpacity(
-                            opacity: _lit || widget.compact ? 1 : 0,
+                            opacity: _lit ? 1 : 0,
                             duration: const Duration(milliseconds: 150),
                             child: const Icon(
-                              Icons.play_circle_outline_rounded,
-                              size: 36,
+                              Icons.play_circle_fill_rounded,
+                              size: 40,
                               color: Colors.white,
-                              shadows: [Shadow(blurRadius: 8)],
+                              shadows: [Shadow(blurRadius: 10)],
                             ),
                           ),
                         ),
@@ -676,42 +1087,134 @@ class _EpisodeTileState extends State<_EpisodeTile> {
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'S${_two(widget.seasonNumber)}E${_two(number)}',
+                        style: const TextStyle(fontSize: 11.5, color: AppColors.textSecondary, letterSpacing: 0.4),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        episode.channel.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                      ),
+                      if (episode.plot != null) ...[
+                        const SizedBox(height: 4),
                         Expanded(
                           child: Text(
-                            widget.compact ? '$number. ${episode.channel.name}' : episode.channel.name,
-                            maxLines: 2,
+                            episode.plot!,
+                            maxLines: compact ? 2 : 3,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+                            style: const TextStyle(color: AppColors.textSecondary, fontSize: 13, height: 1.35),
                           ),
                         ),
-                        if (episode.duration != null)
-                          Padding(
-                            padding: const EdgeInsets.only(left: 12),
-                            child: Text(episode.duration!, style: const TextStyle(color: AppColors.textSecondary)),
-                          ),
-                      ],
-                    ),
-                    if (episode.plot != null) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        episode.plot!,
-                        maxLines: widget.compact ? 2 : 3,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: AppColors.textSecondary, fontSize: 13, height: 1.4),
-                      ),
+                      ] else
+                        const Spacer(),
+                      if (footer.isNotEmpty)
+                        Text(
+                          footer,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600),
+                        ),
                     ],
-                  ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// YouTube-Video (Trailer, Teaser …) mit Vorschaubild; öffnet YouTube.
+class _VideoCard extends StatefulWidget {
+  const _VideoCard({required this.video, required this.width});
+
+  final TmdbVideo video;
+  final double width;
+
+  @override
+  State<_VideoCard> createState() => _VideoCardState();
+}
+
+class _VideoCardState extends State<_VideoCard> {
+  bool _hovered = false;
+  bool _focused = false;
+
+  void _open() => launchUrl(Uri.parse(widget.video.url), mode: LaunchMode.externalApplication);
+
+  @override
+  Widget build(BuildContext context) {
+    final lit = _hovered || _focused;
+    return TvFocus(
+      onActivate: _open,
+      onFocusChange: (v) => setState(() => _focused = v),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: GestureDetector(
+          onTap: _open,
+          child: SizedBox(
+            width: widget.width,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AnimatedScale(
+                  scale: lit ? 1.03 : 1,
+                  duration: const Duration(milliseconds: 150),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: _focused ? Colors.white : Colors.transparent, width: 2),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: AspectRatio(
+                        aspectRatio: 16 / 9,
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            MediaImage(url: widget.video.thumbnail, cacheWidth: (widget.width * 2).round()),
+                            Center(
+                              child: Container(
+                                width: 34,
+                                height: 34,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: Colors.black.withValues(alpha: lit ? 0.7 : 0.45),
+                                  border: Border.all(color: Colors.white.withValues(alpha: 0.7)),
+                                ),
+                                child: const Icon(Icons.play_arrow_rounded, size: 22, color: Colors.white),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  widget.video.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                ),
+                Text(
+                  widget.video.typeLabel,
+                  style: const TextStyle(fontSize: 11.5, color: AppColors.textSecondary),
+                ),
+              ],
+            ),
           ),
         ),
       ),

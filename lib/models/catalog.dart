@@ -16,12 +16,15 @@ class Catalog {
 
 /// Eine Serienfolge; [channel] ist der abspielbare Stream.
 class Episode {
-  const Episode({required this.channel, required this.number, this.plot, this.duration});
+  const Episode({required this.channel, required this.number, this.plot, this.duration, this.airDate});
 
   final Channel channel;
   final int number;
   final String? plot;
   final String? duration;
+
+  /// Erstausstrahlung, falls der Anbieter sie liefert.
+  final DateTime? airDate;
 }
 
 class Season {

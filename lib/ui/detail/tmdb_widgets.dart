@@ -44,19 +44,20 @@ class CastRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 178,
+      height: 64,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         clipBehavior: Clip.none,
-        padding: EdgeInsets.symmetric(horizontal: horizontalPadding, vertical: 6),
+        padding: EdgeInsets.symmetric(horizontal: horizontalPadding, vertical: 4),
         itemCount: cast.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 16),
+        separatorBuilder: (_, _) => const SizedBox(width: 20),
         itemBuilder: (context, i) => _CastTile(person: cast[i]),
       ),
     );
   }
 }
 
+/// Rundes Foto mit Name und Rolle rechts daneben.
 class _CastTile extends StatefulWidget {
   const _CastTile({required this.person});
 
@@ -85,49 +86,51 @@ class _CastTileState extends State<_CastTile> {
         onExit: (_) => setState(() => _hovered = false),
         child: GestureDetector(
           onTap: _open,
-          child: SizedBox(
-            width: 104,
-            child: Column(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            padding: const EdgeInsets.fromLTRB(4, 4, 12, 4),
+            decoration: BoxDecoration(
+              color: lit ? Colors.white.withValues(alpha: 0.08) : Colors.transparent,
+              borderRadius: BorderRadius.circular(30),
+              border: Border.all(color: _focused ? Colors.white : Colors.transparent, width: 2),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                AnimatedScale(
-                  scale: lit ? 1.06 : 1,
-                  duration: const Duration(milliseconds: 160),
-                  child: Container(
-                    width: 96,
-                    height: 96,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: _focused ? Colors.white : Colors.white.withValues(alpha: lit ? 0.3 : 0.1),
-                        width: _focused ? 2.5 : 1,
-                      ),
-                      boxShadow: [if (lit) const BoxShadow(color: Color(0x88000000), blurRadius: 14)],
-                    ),
-                    child: ClipOval(
-                      child: MediaImage(
-                        url: person.photo,
-                        cacheWidth: 220,
-                        placeholder: _Initials(name: person.name),
-                      ),
+                SizedBox(
+                  width: 46,
+                  height: 46,
+                  child: ClipOval(
+                    child: MediaImage(
+                      url: person.photo,
+                      cacheWidth: 120,
+                      placeholder: _Initials(name: person.name),
                     ),
                   ),
                 ),
-                const SizedBox(height: 10),
-                Text(
-                  person.name,
-                  maxLines: 2,
-                  textAlign: TextAlign.center,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, height: 1.2),
-                ),
-                if (person.character != null)
-                  Text(
-                    person.character!,
-                    maxLines: 1,
-                    textAlign: TextAlign.center,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: AppColors.textSecondary, fontSize: 11.5),
+                const SizedBox(width: 12),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 170),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        person.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5, height: 1.25),
+                      ),
+                      if (person.character != null)
+                        Text(
+                          person.character!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: AppColors.textSecondary, fontSize: 12, height: 1.3),
+                        ),
+                    ],
                   ),
+                ),
               ],
             ),
           ),
@@ -150,7 +153,7 @@ class _Initials extends StatelessWidget {
       child: Center(
         child: Text(
           letters,
-          style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w700, color: AppColors.textSecondary),
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.textSecondary),
         ),
       ),
     );

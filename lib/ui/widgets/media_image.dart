@@ -17,10 +17,12 @@ class MediaImage extends ConsumerWidget {
     this.placeholder,
     this.cacheWidth,
     this.padding = EdgeInsets.zero,
+    this.alignment = Alignment.center,
   });
 
   final String? url;
   final BoxFit fit;
+  final AlignmentGeometry alignment;
   final Widget? placeholder;
   final int? cacheWidth;
 
@@ -37,6 +39,7 @@ class MediaImage extends ConsumerWidget {
       proxiedUrl(url!, userAgent: userAgent),
       headers: {'User-Agent': userAgent},
       fit: fit,
+      alignment: alignment,
       cacheWidth: cacheWidth,
       // Der Fehler-Platzhalter läuft nicht durch frameBuilder, bleibt also ungepolstert.
       frameBuilder: (context, child, frame, wasSync) {

@@ -127,6 +127,7 @@ class XtreamApi {
             number: episodeNum,
             plot: _text(epInfo['plot']),
             duration: _formatDuration(epInfo['duration_secs'], epInfo['duration']),
+            airDate: DateTime.tryParse(_text(epInfo['air_date']) ?? _text(epInfo['releasedate']) ?? ''),
             channel: Channel(
               id: 'episode-$id',
               name: title?.isNotEmpty == true ? title! : 'Folge $episodeNum',

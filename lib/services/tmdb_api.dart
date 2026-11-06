@@ -90,12 +90,14 @@ class TmdbApi {
   Future<TmdbTitle> title(int id, TmdbMediaType type) async {
     final isTv = type == TmdbMediaType.tv;
     final append = isTv
-        ? 'aggregate_credits,videos,recommendations,content_ratings'
-        : 'credits,videos,recommendations,release_dates';
+        ? 'aggregate_credits,videos,recommendations,content_ratings,images'
+        : 'credits,videos,recommendations,release_dates,images';
     final data = await _get('/${isTv ? 'tv' : 'movie'}/$id', {
       'append_to_response': append,
       // Trailer auch auf Englisch, falls es keinen deutschen gibt.
       'include_video_language': 'de,en,null',
+      // Schriftzug-Logos: deutsch, englisch oder ohne Sprache.
+      'include_image_language': 'de,en,null',
     });
     var result = TmdbTitle.fromJson(data, type);
     if (result.overview == null) {

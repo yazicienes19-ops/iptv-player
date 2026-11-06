@@ -960,3 +960,35 @@ final playlistTitleIndexProvider = Provider<PlaylistTitleIndex>((ref) {
   final series = ref.watch(catalogProvider(ContentType.series)).value?.channels ?? const <Channel>[];
   return PlaylistTitleIndex([...movies, ...series]);
 });
+
+/// Ein anderer Eintrag der Playlist mit demselben Titel (andere Kategorie, Sprache oder Qualität).
+class AlternativeSource {
+  const AlternativeSource({required this.channel, this.categoryName});
+
+  final Channel channel;
+  final String? categoryName;
+}
+
+/// Gleicher bereinigter Titel, gleiches Jahr (falls beide eines haben), gleicher Typ.
+List<AlternativeSource> findAlternativeSources(Channel channel, Catalog catalog) {
+  if (channel.isSeparator) return const [];
+  final parsed = cleanCatalogTitle(channel.name);
+  final key = catalogTitleKey(parsed.title);
+  if (key.isEmpty) return const [];
+  final year = channel.year ?? parsed.year;
+  final categories = {for (final c in catalog.categories) c.id: c.name};
+  return [
+    for (final other in catalog.channels)
+      if (other != channel && !other.isSeparator && other.type == channel.type)
+        if (catalogTitleKey(cleanCatalogTitle(other.name).title) == key)
+          if (year == null ||
+              (other.year ?? cleanCatalogTitle(other.name).year) == null ||
+              (other.year ?? cleanCatalogTitle(other.name).year) == year)
+            AlternativeSource(channel: other, categoryName: categories[other.categoryId]),
+  ];
+}
+
+final alternativeSourcesProvider = Provider.family<List<AlternativeSource>, Channel>((ref, channel) {
+  final catalog = ref.watch(catalogProvider(channel.type)).value;
+  return catalog == null ? const [] : findAlternativeSources(channel, catalog);
+});
