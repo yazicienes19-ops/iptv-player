@@ -19,14 +19,6 @@ import 'package:iptv_player/ui/theme.dart';
 import 'personal_library_test.dart' show PersonalSecureStore, playlistA;
 import 'recommendations_test.dart' show NoImdb;
 
-Channel _movie(String id, String name, {String? category}) => Channel(
-  id: id,
-  name: name,
-  streamUrl: 'https://example.test/$id.mp4',
-  type: ContentType.movie,
-  categoryId: category,
-);
-
 final _series = Channel(
   id: 'got',
   name: 'DE - Game of Thrones (2011)',
@@ -133,23 +125,6 @@ void main() {
     expect(tmdb.videos.first.thumbnail, 'https://img.youtube.com/vi/t1/hqdefault.jpg');
   });
 
-  test('Andere Quellen: gleicher Titel in anderen Kategorien, nicht der Titel selbst', () {
-    final a = _movie('a', 'DE - Spider-Man: No Way Home (2021)', category: 'de');
-    final b = _movie('b', 'DE - 4K - Spider-Man: No Way Home (2021)', category: 'uhd');
-    final remake = _movie('c', 'DE - Spider-Man: No Way Home (1990)', category: 'de');
-    final other = _movie('d', 'DE - Spider-Man: Homecoming (2017)', category: 'de');
-    final catalog = Catalog(
-      categories: const [
-        Category(id: 'de', name: 'Deutsche Filme', type: ContentType.movie),
-        Category(id: 'uhd', name: '4K Filme', type: ContentType.movie),
-      ],
-      channels: [a, b, remake, other],
-    );
-    final sources = findAlternativeSources(a, catalog, CatalogTitleKeys.of(catalog.channels));
-    expect(sources.map((s) => s.channel), [b]);
-    expect(sources.single.categoryName, '4K Filme');
-  });
-
   for (final size in [const Size(1280, 800), const Size(390, 844)]) {
     testWidgets('Serien-Detailseite ohne Fehler bei ${size.width.toInt()} px', (tester) async {
       await _loadRealFont();
@@ -205,7 +180,6 @@ void main() {
       // Startet immer ganz oben mit dem großen Titelbild.
       final scroll = tester.widget<CustomScrollView>(find.byType(CustomScrollView)).controller!;
       expect(scroll.offset, 0);
-      expect(find.text('Andere Quellen (1)'), findsOneWidget);
       // Abschnitte entstehen erst beim Hinscrollen.
       for (final label in ['BEWERTUNGEN', 'BESETZUNG', 'FOLGEN', 'S01E01', 'VIDEOS']) {
         await tester.scrollUntilVisible(find.text(label), 200, scrollable: find.byType(Scrollable).first);
@@ -223,16 +197,11 @@ void main() {
         );
       }
 
-      // Staffel wechseln und „Andere Quellen“ öffnen.
+      // Staffel wechseln.
       await tester.scrollUntilVisible(find.text('Staffel 2'), 200, scrollable: find.byType(Scrollable).first);
       await tester.tap(find.text('Staffel 2'));
       await tester.pumpAndSettle();
       expect(find.text('S02E01'), findsOneWidget);
-      await tester.drag(find.byType(CustomScrollView), const Offset(0, 4000));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('other-sources')));
-      await tester.pumpAndSettle();
-      expect(find.text('Englische Serien'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   }

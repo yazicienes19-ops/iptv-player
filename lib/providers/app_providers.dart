@@ -1020,38 +1020,6 @@ final catalogTitleKeysProvider = FutureProvider.family<CatalogTitleKeys, Content
   return CatalogTitleKeys(catalog.channels, parsed);
 });
 
-/// Ein anderer Eintrag der Playlist mit demselben Titel (andere Kategorie, Sprache oder Qualität).
-class AlternativeSource {
-  const AlternativeSource({required this.channel, this.categoryName});
-
-  final Channel channel;
-  final String? categoryName;
-}
-
-/// Gleicher bereinigter Titel, gleiches Jahr (falls beide eines haben), gleicher Typ.
-List<AlternativeSource> findAlternativeSources(Channel channel, Catalog catalog, CatalogTitleKeys keys) {
-  if (channel.isSeparator) return const [];
-  final parsed = cleanCatalogTitle(channel.name);
-  final key = catalogTitleKey(parsed.title);
-  if (key.isEmpty) return const [];
-  final year = channel.year ?? parsed.year;
-  final categories = {for (final c in catalog.categories) c.id: c.name};
-  return [
-    for (final i in keys.byKey[key] ?? const <int>[])
-      if (keys.channels[i] != channel && keys.channels[i].type == channel.type)
-        if (year == null ||
-            (keys.channels[i].year ?? keys.years[i]) == null ||
-            (keys.channels[i].year ?? keys.years[i]) == year)
-          AlternativeSource(channel: keys.channels[i], categoryName: categories[keys.channels[i].categoryId]),
-  ];
-}
-
-final alternativeSourcesProvider = Provider.family<List<AlternativeSource>, Channel>((ref, channel) {
-  final catalog = ref.watch(catalogProvider(channel.type)).value;
-  final keys = ref.watch(catalogTitleKeysProvider(channel.type)).value;
-  return catalog == null || keys == null ? const [] : findAlternativeSources(channel, catalog, keys);
-});
-
 // ---------------------------------------------------------------------------
 // Downloads und Aufnahmen
 // ---------------------------------------------------------------------------

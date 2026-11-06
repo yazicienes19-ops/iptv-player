@@ -2,7 +2,7 @@
 
 ## Was wurde verbessert?
 
-Serien und Filme öffnen sich deutlich schneller. Bisher hat die Suche nach „Andere Quellen“ bei jedem Öffnen die Titel des ganzen Katalogs bereinigt, bei 20.000 Einträgen etwa eine Sekunde, in der die App stand. Jetzt geschieht das einmal pro Katalog im Hintergrund. Zusätzlich lädt IpFlix Details und TMDB-Daten schon vor, wenn die Maus kurz auf einem Poster liegt.
+Serien und Filme öffnen sich deutlich schneller. Bisher hat die Suche nach „Andere Quellen“ bei jedem Öffnen die Titel des ganzen Katalogs bereinigt, bei 20.000 Einträgen etwa eine Sekunde, in der die App stand. „Andere Quellen“ ist deshalb wieder entfernt; die Titel für Empfehlungen werden nur noch einmal pro Katalog im Hintergrund bereinigt. Zusätzlich lädt IpFlix Details und TMDB-Daten schon vor, wenn die Maus kurz auf einem Poster liegt.
 
 ## Was ist neu?
 

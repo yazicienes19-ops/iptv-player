@@ -72,7 +72,6 @@ class _DetailPageState extends ConsumerState<DetailPage> {
         .where((c) => c.categoryId == channel.categoryId && c != channel)
         .take(20)
         .toList();
-    final alternatives = ref.watch(alternativeSourcesProvider(channel));
 
     final name = channel.display;
     final hasTmdbKey = ref.watch(tmdbApiProvider) != null;
@@ -240,16 +239,6 @@ class _DetailPageState extends ConsumerState<DetailPage> {
                   label: 'Von vorne',
                   icon: Icons.replay_rounded,
                   onPressed: () => playFullscreen(context, ref, channel, widget.queue, fromStart: true),
-                ),
-              ),
-              const SizedBox(width: 10),
-            ],
-            if (alternatives.isNotEmpty) ...[
-              Expanded(
-                child: _PillButton(
-                  key: const ValueKey('other-sources'),
-                  label: 'Andere Quellen (${alternatives.length})',
-                  onPressed: () => _showAlternatives(context, alternatives, isSeries: isSeries),
                 ),
               ),
               const SizedBox(width: 10),
@@ -480,68 +469,6 @@ class _DetailPageState extends ConsumerState<DetailPage> {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Future<void> _showAlternatives(BuildContext context, List<AlternativeSource> alternatives, {required bool isSeries}) {
-    return showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: AppColors.surface,
-      isScrollControlled: true,
-      constraints: const BoxConstraints(maxWidth: 640),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (sheetContext) => SafeArea(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.7),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Padding(
-                padding: EdgeInsets.fromLTRB(20, 18, 20, 4),
-                child: Text('Andere Quellen', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
-              ),
-              const Padding(
-                padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
-                child: Text(
-                  'Derselbe Titel in anderen Kategorien, Sprachen oder Qualitäten deiner Playlist.',
-                  style: TextStyle(fontSize: 12.5, color: AppColors.textSecondary),
-                ),
-              ),
-              Flexible(
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  padding: const EdgeInsets.only(bottom: 12),
-                  itemCount: alternatives.length,
-                  itemBuilder: (context, i) {
-                    final source = alternatives[i];
-                    final display = source.channel.display;
-                    return ListTile(
-                      leading: Icon(isSeries ? Icons.video_library_outlined : Icons.play_circle_outline_rounded),
-                      title: Text(source.channel.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-                      subtitle: source.categoryName == null
-                          ? null
-                          : Text(source.categoryName!, maxLines: 1, overflow: TextOverflow.ellipsis),
-                      trailing: Wrap(
-                        spacing: 4,
-                        children: [for (final q in display.qualities.take(2)) QualityBadge(tag: q)],
-                      ),
-                      onTap: () {
-                        Navigator.of(sheetContext).pop();
-                        if (isSeries) {
-                          Navigator.of(context).pushReplacement(DetailPage.route(source.channel, widget.queue));
-                        } else {
-                          playFullscreen(context, ref, source.channel, [source.channel]);
-                        }
-                      },
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }
