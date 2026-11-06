@@ -12,6 +12,7 @@ import '../../models/tmdb.dart';
 import '../../providers/app_providers.dart';
 import '../../providers/imdb_providers.dart';
 import '../../services/download_manager.dart';
+import '../../services/imdb_catalog.dart';
 import '../../services/personal_library.dart';
 import '../browse/browse_view.dart';
 import '../browse/poster_card.dart';
@@ -218,7 +219,8 @@ class _DetailPageState extends ConsumerState<DetailPage> {
           label: playLabel,
           icon: Icons.play_arrow_rounded,
           primary: true,
-          autofocus: true,
+          // Nur für die Fernbedienung: am Mac würde der Fokus die Seite aus der Startansicht scrollen.
+          autofocus: ref.watch(isTelevisionProvider),
           onPressed: isSeries && season == null ? null : play,
         ),
         const SizedBox(height: 10),
@@ -242,18 +244,23 @@ class _DetailPageState extends ConsumerState<DetailPage> {
               ),
               const SizedBox(width: 10),
             ],
-            Expanded(
-              child: _PillButton(
-                key: const ValueKey('other-sources'),
-                label: alternatives.isEmpty ? 'Keine anderen Quellen' : 'Andere Quellen (${alternatives.length})',
-                onPressed: alternatives.isEmpty
-                    ? null
-                    : () => _showAlternatives(context, alternatives, isSeries: isSeries),
+            if (alternatives.isNotEmpty) ...[
+              Expanded(
+                child: _PillButton(
+                  key: const ValueKey('other-sources'),
+                  label: 'Andere Quellen (${alternatives.length})',
+                  onPressed: () => _showAlternatives(context, alternatives, isSeries: isSeries),
+                ),
               ),
-            ),
-            const SizedBox(width: 10),
+              const SizedBox(width: 10),
+            ],
             if (!isSeries && isDownloadable(channel)) ...[
-              DownloadButton(channel: channel, title: name.title, subtitle: year?.toString(), poster: poster),
+              DownloadButton(
+                channel: channel,
+                title: tmdb?.title ?? cleanCatalogTitle(name.title).title,
+                subtitle: year?.toString(),
+                poster: poster,
+              ),
               const SizedBox(width: 10),
             ],
             for (final option in [FeedbackChoice.like, FeedbackChoice.hide]) ...[
@@ -287,11 +294,11 @@ class _DetailPageState extends ConsumerState<DetailPage> {
 
     // --- Bewertungen --------------------------------------------------------------------
     final ratings = <_RatingItem>[
-      if ((tmdb?.rating ?? 0) > 0) _RatingItem('TMDB', '${(tmdb!.rating! * 10).round()} %', const Color(0xFF01B4E4)),
+      if ((tmdb?.rating ?? 0) > 0) _RatingItem(_RatingSource.tmdb, '${(tmdb!.rating! * 10).round()} %'),
       if (matchedMovie != null && matchedMovie.rating > 0)
-        _RatingItem('IMDb', matchedMovie.rating.toStringAsFixed(1), const Color(0xFFF5C518)),
-      if ((details.rating ?? 0) > 0) _RatingItem('Anbieter', details.rating!.toStringAsFixed(1), AppColors.accent),
-      if ((tmdb?.voteCount ?? 0) > 0) _RatingItem('Stimmen', _compactCount(tmdb!.voteCount), AppColors.textSecondary),
+        _RatingItem(_RatingSource.imdb, _decimal(matchedMovie.rating)),
+      if ((details.rating ?? 0) > 0) _RatingItem(_RatingSource.provider, _decimal(details.rating!)),
+      if ((tmdb?.voteCount ?? 0) > 0) _RatingItem(_RatingSource.votes, _compactCount(tmdb!.voteCount)),
     ];
 
     final sections = <Widget>[
@@ -910,12 +917,64 @@ class _SectionLabel extends StatelessWidget {
   }
 }
 
-class _RatingItem {
-  const _RatingItem(this.source, this.value, this.color);
+enum _RatingSource {
+  tmdb('TMDB'),
+  imdb('IMDb'),
+  provider('Anbieter'),
+  votes('Stimmen');
 
-  final String source;
+  const _RatingSource(this.label);
+  final String label;
+}
+
+String _decimal(double value) => value.toStringAsFixed(1).replaceAll('.', ',');
+
+class _RatingItem {
+  const _RatingItem(this.source, this.value);
+
+  final _RatingSource source;
   final String value;
-  final Color color;
+}
+
+/// Kleines Abzeichen der Bewertungsquelle (in der App gezeichnet, keine Bilddateien).
+class _RatingLogo extends StatelessWidget {
+  const _RatingLogo(this.source);
+
+  final _RatingSource source;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget wordmark(String text, {required Gradient gradient, required Color color}) => Container(
+      height: 18,
+      padding: const EdgeInsets.symmetric(horizontal: 5),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(gradient: gradient, borderRadius: BorderRadius.circular(4)),
+      child: Text(
+        text,
+        style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w900, color: color, letterSpacing: 0.2, height: 1),
+      ),
+    );
+    Widget symbol(IconData icon) => Container(
+      width: 18,
+      height: 18,
+      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(4)),
+      child: Icon(icon, size: 13, color: Colors.white),
+    );
+    return switch (source) {
+      _RatingSource.tmdb => wordmark(
+        'TMDB',
+        gradient: const LinearGradient(colors: [Color(0xFF90CEA1), Color(0xFF01B4E4)]),
+        color: const Color(0xFF0D253F),
+      ),
+      _RatingSource.imdb => wordmark(
+        'IMDb',
+        gradient: const LinearGradient(colors: [Color(0xFFF5C518), Color(0xFFF5C518)]),
+        color: Colors.black,
+      ),
+      _RatingSource.provider => symbol(Icons.live_tv_rounded),
+      _RatingSource.votes => symbol(Icons.people_alt_rounded),
+    };
+  }
 }
 
 class _RatingTile extends StatelessWidget {
@@ -932,16 +991,15 @@ class _RatingTile extends StatelessWidget {
         Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 8,
-              height: 8,
-              decoration: BoxDecoration(color: item.color, shape: BoxShape.circle),
-            ),
-            const SizedBox(width: 6),
-            Text(item.source, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+            _RatingLogo(item.source),
+            // Schriftzug-Logos sprechen für sich; Symbole bekommen ihren Namen dazu.
+            if (item.source == _RatingSource.provider || item.source == _RatingSource.votes) ...[
+              const SizedBox(width: 6),
+              Text(item.source.label, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+            ],
           ],
         ),
-        const SizedBox(height: 2),
+        const SizedBox(height: 4),
         Text(item.value, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
       ],
     );
@@ -1131,7 +1189,7 @@ class _EpisodeCardState extends State<_EpisodeCard> {
                         Expanded(
                           child: Text(
                             episode.plot!,
-                            maxLines: compact ? 2 : 3,
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(color: AppColors.textSecondary, fontSize: 13, height: 1.35),
                           ),

@@ -198,6 +198,9 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
+      // Startet immer ganz oben mit dem großen Titelbild.
+      final scroll = tester.widget<CustomScrollView>(find.byType(CustomScrollView)).controller!;
+      expect(scroll.offset, 0);
       expect(find.text('Andere Quellen (1)'), findsOneWidget);
       // Abschnitte entstehen erst beim Hinscrollen.
       for (final label in ['BEWERTUNGEN', 'BESETZUNG', 'FOLGEN', 'S01E01', 'VIDEOS']) {
