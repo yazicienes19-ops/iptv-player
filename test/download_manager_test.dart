@@ -17,13 +17,26 @@ class _FakeProvider {
   late HttpServer server;
   final ranges = <String?>[];
   bool throttle = false;
+  int throttleMs = 20;
   bool htmlError = false;
+
+  /// Gleichzeitig offene Verbindungen; über [connectionLimit] gibt es 403 wie bei echten Anbietern.
+  int open = 0;
+  int maxOpen = 0;
+  int? connectionLimit;
 
   Future<void> start() async {
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     server.listen((req) async {
       final res = req.response;
       ranges.add(req.headers.value('range'));
+      if (connectionLimit != null && open >= connectionLimit!) {
+        res.statusCode = 403;
+        await res.close();
+        return;
+      }
+      open++;
+      if (open > maxOpen) maxOpen = open;
       if (htmlError) {
         res.headers.set('content-type', 'text/html');
         res.write('<html>Konto gesperrt</html>');
@@ -31,24 +44,28 @@ class _FakeProvider {
         return;
       }
       var start = 0;
-      final range = RegExp(r'bytes=(\d+)-').firstMatch(req.headers.value('range') ?? '');
+      var end = body.length - 1;
+      final range = RegExp(r'bytes=(\d+)-(\d*)').firstMatch(req.headers.value('range') ?? '');
       if (range != null) {
         start = int.parse(range.group(1)!);
+        if (range.group(2)!.isNotEmpty) end = int.parse(range.group(2)!);
         res.statusCode = 206;
-        res.headers.set('content-range', 'bytes $start-${body.length - 1}/${body.length}');
+        res.headers.set('content-range', 'bytes $start-$end/${body.length}');
       }
       res.headers.set('content-type', 'video/mp4');
-      res.contentLength = body.length - start;
+      res.contentLength = end - start + 1;
       const chunk = 16 * 1024;
       try {
-        for (var i = start; i < body.length; i += chunk) {
-          res.add(body.sublist(i, (i + chunk).clamp(0, body.length)));
-          if (throttle) await Future<void>.delayed(const Duration(milliseconds: 20));
+        for (var i = start; i <= end; i += chunk) {
+          res.add(body.sublist(i, (i + chunk).clamp(0, end + 1)));
+          if (throttle) await Future<void>.delayed(Duration(milliseconds: throttleMs));
           await res.flush();
         }
         await res.close();
       } catch (_) {
         // Client hat abgebrochen.
+      } finally {
+        open--;
       }
     });
   }
@@ -70,12 +87,7 @@ void main() {
   late MemoryDownloadIndexStore store;
   final body = Uint8List.fromList(List.generate(600 * 1024, (i) => i % 251));
 
-  DownloadEngine engine() => DownloadEngine(
-    dio: Dio(),
-    directory: () async => dir,
-    store: store,
-    onChange: (_) {},
-  );
+  DownloadEngine engine() => DownloadEngine(dio: Dio(), directory: () async => dir, store: store, onChange: (_) {});
 
   Channel movie(String id, {String? url}) =>
       Channel(id: id, name: 'Film $id', streamUrl: url ?? provider.url('$id.mkv'), type: ContentType.movie);
@@ -188,13 +200,7 @@ void main() {
 
   test('Aufnahme: leere wird verworfen, gefüllte bleibt mit Dauer', () async {
     var now = DateTime(2026, 11, 6, 20, 15);
-    final e = DownloadEngine(
-      dio: Dio(),
-      directory: () async => dir,
-      store: store,
-      onChange: (_) {},
-      clock: () => now,
-    );
+    final e = DownloadEngine(dio: Dio(), directory: () async => dir, store: store, onChange: (_) {}, clock: () => now);
     const live = Channel(id: 'ard', name: 'Das Erste HD', streamUrl: 'https://x.test/ard.m3u8', type: ContentType.live);
     final (emptyId, _) = await e.beginRecording(live, playlistId: 'a');
     await e.finishRecording(emptyId);
@@ -210,5 +216,66 @@ void main() {
     expect(item.recordedFor, const Duration(minutes: 42));
     expect(item.received, 2048);
     expect(item.subtitle, contains('20:15'));
+  });
+
+  group('mehrere Verbindungen', () {
+    DownloadEngine parallel(int budget) => DownloadEngine(
+      dio: Dio(),
+      directory: () async => dir,
+      store: store,
+      onChange: (_) {},
+      connectionBudget: () async => budget,
+      minSegmentedSize: 64 * 1024,
+    );
+
+    test('lädt in 3 Teilen gleichzeitig und setzt die Datei richtig zusammen', () async {
+      provider.throttle = true;
+      final e = parallel(3);
+      await e.enqueue(movie('p1'), playlistId: 'a', title: 'Parallel');
+      await _until(() => e.items.single.isDone, timeout: const Duration(seconds: 20));
+      expect(e.items.single.segments, 3);
+      expect(provider.maxOpen, 3);
+      expect(await (await e.fileOf(e.items.single)).readAsBytes(), body);
+      // Keine Teildateien bleiben liegen.
+      expect(dir.listSync().map((f) => f.path.split('/').last), [e.items.single.fileName]);
+    });
+
+    test('Budget 1 oder kleine Datei: wie bisher eine Verbindung', () async {
+      final e = parallel(1);
+      await e.enqueue(movie('p2'), playlistId: 'a', title: 'Einzeln');
+      await _until(() => e.items.single.isDone);
+      expect(e.items.single.segments, isNull);
+      expect(provider.maxOpen, 1);
+    });
+
+    test('Anbieter lehnt weitere Verbindungen ab: Teile werden nacheinander geladen', () async {
+      provider.connectionLimit = 1;
+      final e = parallel(4);
+      await e.enqueue(movie('p3'), playlistId: 'a', title: 'Limit');
+      await _until(
+        () => e.items.single.isDone || e.items.single.status == DownloadStatus.failed,
+        timeout: const Duration(seconds: 20),
+      );
+      expect(e.items.single.status, DownloadStatus.done, reason: e.items.single.error);
+      expect(await (await e.fileOf(e.items.single)).readAsBytes(), body);
+    });
+
+    test('Pause und Weiterladen: jedes Teil macht an seiner Stelle weiter', () async {
+      provider.throttle = true;
+      provider.throttleMs = 120; // langsamer als die Fortschrittsmeldung (alle 0,4 s)
+      final e = parallel(3);
+      await e.enqueue(movie('p4'), playlistId: 'a', title: 'Pause');
+      await _until(() => e.items.single.received > 96 * 1024);
+      await e.pause(e.items.single.id);
+      await _until(() => e.items.single.status == DownloadStatus.paused);
+      final before = provider.ranges.length;
+      provider.throttle = false;
+      await e.resume(e.items.single.id);
+      await _until(() => e.items.single.isDone, timeout: const Duration(seconds: 20));
+      final resumed = provider.ranges.skip(before).toList();
+      // Fortsetzen ab der jeweiligen Stelle, nicht ab Teilanfang.
+      expect(resumed.where((r) => r != null && !r.startsWith('bytes=0-')), isNotEmpty);
+      expect(await (await e.fileOf(e.items.single)).readAsBytes(), body);
+    });
   });
 }

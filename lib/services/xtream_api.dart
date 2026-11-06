@@ -65,6 +65,16 @@ class XtreamApi {
     if (status != 'active') throw XtreamException('Konto nicht aktiv (Status: ${info['status']}).');
   }
 
+  /// Erlaubte und gerade genutzte Verbindungen laut Anbieter (`null`, wenn er es nicht verrät).
+  Future<({int max, int active})?> connectionInfo() async {
+    final data = await _get(null);
+    final info = data is Map ? data['user_info'] : null;
+    if (info is! Map) return null;
+    final max = int.tryParse('${info['max_connections']}');
+    if (max == null) return null;
+    return (max: max, active: int.tryParse('${info['active_cons']}') ?? 0);
+  }
+
   static const _categoryActions = {
     ContentType.live: 'get_live_categories',
     ContentType.movie: 'get_vod_categories',

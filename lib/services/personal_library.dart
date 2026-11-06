@@ -89,11 +89,20 @@ class VodViewing {
 /// Where a film or episode was left off. Finished titles keep a `done` marker
 /// so the series page can continue with the next episode.
 class ResumePoint {
-  const ResumePoint({required this.positionMs, required this.durationMs, required this.at, this.done = false});
+  const ResumePoint({
+    required this.positionMs,
+    required this.durationMs,
+    required this.at,
+    this.done = false,
+    this.seriesId,
+  });
   final int positionMs;
   final int durationMs;
   final int at;
   final bool done;
+
+  /// Bei Folgen die Serie im Katalog; damit findet „Weiterschauen“ die Serie wieder.
+  final String? seriesId;
 
   Duration get position => Duration(milliseconds: positionMs);
   Duration get remaining => Duration(milliseconds: math.max(0, durationMs - positionMs));
@@ -103,7 +112,13 @@ class ResumePoint {
       ? 0
       : (positionMs / durationMs).clamp(0, 1).toDouble();
 
-  Map<String, dynamic> toJson() => {'pos': positionMs, 'dur': durationMs, 'at': at, if (done) 'done': true};
+  Map<String, dynamic> toJson() => {
+    'pos': positionMs,
+    'dur': durationMs,
+    'at': at,
+    if (done) 'done': true,
+    if (seriesId != null) 'sid': seriesId,
+  };
 }
 
 /// Personal timestamps, feedback and a bounded cache of structured film metadata.
@@ -216,6 +231,7 @@ class PersonalLibrary {
           durationMs: data['dur'] as int,
           at: data['at'] as int,
           done: data['done'] == true,
+          seriesId: data['sid'] is String ? data['sid'] as String : null,
         );
       }
     }
@@ -259,6 +275,7 @@ class PersonalLibrary {
       durationMs: dur,
       at: now.millisecondsSinceEpoch,
       done: finished,
+      seriesId: channel.seriesId,
     );
     while (updated.length > maxResumePoints) {
       updated.remove(updated.keys.first);

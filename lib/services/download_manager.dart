@@ -37,6 +37,7 @@ class DownloadItem {
     this.error,
     this.finishedAt,
     this.recordedFor,
+    this.segments,
   });
 
   final String id;
@@ -57,6 +58,9 @@ class DownloadItem {
   final DateTime? finishedAt;
   final Duration? recordedFor;
 
+  /// Wird in so vielen Teilen gleichzeitig geladen (`null` = eine Verbindung).
+  final int? segments;
+
   bool get isDone => status == DownloadStatus.done;
   bool get isActive => status == DownloadStatus.downloading;
   double? get fraction => total == null || total! <= 0 ? null : (received / total!).clamp(0.0, 1.0);
@@ -68,6 +72,7 @@ class DownloadItem {
     String? Function()? error,
     DateTime? finishedAt,
     Duration? recordedFor,
+    int? Function()? segments,
   }) => DownloadItem(
     id: id,
     kind: kind,
@@ -84,6 +89,7 @@ class DownloadItem {
     error: error != null ? error() : this.error,
     finishedAt: finishedAt ?? this.finishedAt,
     recordedFor: recordedFor ?? this.recordedFor,
+    segments: segments != null ? segments() : this.segments,
   );
 
   Map<String, dynamic> toJson() => {
@@ -102,6 +108,7 @@ class DownloadItem {
     'createdAt': createdAt.toIso8601String(),
     'finishedAt': finishedAt?.toIso8601String(),
     'recordedForMs': recordedFor?.inMilliseconds,
+    'seg': segments,
   };
 
   factory DownloadItem.fromJson(Map<String, dynamic> json) => DownloadItem(
@@ -120,6 +127,7 @@ class DownloadItem {
     createdAt: DateTime.tryParse(json['createdAt'] as String? ?? '') ?? DateTime.now(),
     finishedAt: DateTime.tryParse(json['finishedAt'] as String? ?? ''),
     recordedFor: json['recordedForMs'] == null ? null : Duration(milliseconds: json['recordedForMs'] as int),
+    segments: json['seg'] as int?,
   );
 }
 
@@ -178,6 +186,8 @@ class DownloadEngine {
     required this.store,
     required this.onChange,
     this.beforeRequest,
+    this.connectionBudget,
+    this.minSegmentedSize = 64 * 1024 * 1024,
     DateTime Function()? clock,
   }) : _now = clock ?? DateTime.now;
 
@@ -188,7 +198,17 @@ class DownloadEngine {
 
   /// z. B. VPN-Kill-Switch; wirft, wenn gerade nichts geladen werden darf.
   final Future<void> Function()? beforeRequest;
+
+  /// Wie viele Verbindungen ein Download gleichzeitig nutzen darf (Anbieterlimit minus
+  /// laufende Streams). Ohne Angabe nur eine.
+  final Future<int> Function()? connectionBudget;
   final DateTime Function() _now;
+
+  /// Höchstens so viele Teile; mehr bringt selten etwas und fällt Anbietern auf.
+  static const maxSegments = 4;
+
+  /// Kleinere Dateien lohnen das Aufteilen nicht.
+  final int minSegmentedSize;
 
   List<DownloadItem> _items = const [];
   List<DownloadItem> get items => _items;
@@ -306,7 +326,7 @@ class DownloadEngine {
     _emit();
     await _persist();
     final file = await fileOf(item);
-    for (final f in [file, File('${file.path}.part')]) {
+    for (final f in [file, File('${file.path}.part'), for (var i = 0; i < maxSegments; i++) _segmentFile(file, i)]) {
       try {
         if (await f.exists()) await f.delete();
       } on FileSystemException {
@@ -396,63 +416,28 @@ class DownloadEngine {
     }
   }
 
+  static File _segmentFile(File target, int i) => File('${target.path}.part$i');
+
   Future<void> _download(DownloadItem item) async {
     final target = await fileOf(item);
     final part = File('${target.path}.part');
     try {
       await target.parent.create(recursive: true);
       await beforeRequest?.call();
-      var start = await part.exists() ? await part.length() : 0;
       final cancel = CancelToken();
       _cancel = cancel;
-      final response = await dio.get<ResponseBody>(
-        item.channel.streamUrl,
-        cancelToken: cancel,
-        options: Options(
-          responseType: ResponseType.stream,
-          headers: {if (start > 0) 'Range': 'bytes=$start-'},
-          receiveTimeout: const Duration(seconds: 60),
-          validateStatus: (s) => s != null && s < 400,
-        ),
-      );
-      final contentType = response.headers.value(Headers.contentTypeHeader) ?? '';
-      if (contentType.startsWith('text/') || contentType.contains('json')) {
-        throw const _DownloadError('Der Anbieter hat statt einer Videodatei eine Fehlerseite geliefert.');
+      var segments = item.segments;
+      // Ein angefangener Einzel-Download wird auch so zu Ende geladen.
+      if (segments == null && !await part.exists()) {
+        segments = await _planSegments(item, cancel);
+        if (segments != null) await _persist();
       }
-      if (start > 0 && response.statusCode != 206) start = 0; // Kein Fortsetzen möglich: von vorne.
-      final length = int.tryParse(response.headers.value(Headers.contentLengthHeader) ?? '');
-      final rangeTotal = RegExp(r'/(\d+)$').firstMatch(response.headers.value('content-range') ?? '')?.group(1);
-      final total = int.tryParse(rangeTotal ?? '') ?? (length == null ? null : start + length);
-
-      final sink = part.openWrite(mode: start > 0 ? FileMode.append : FileMode.write);
-      var received = start;
-      var lastEmit = DateTime.fromMillisecondsSinceEpoch(0);
-      _update(item.id, (i) => i.copyWith(received: received, total: () => total));
-      try {
-        await for (final chunk in response.data!.stream) {
-          sink.add(chunk);
-          received += chunk.length;
-          final now = DateTime.now();
-          if (now.difference(lastEmit) > const Duration(milliseconds: 400)) {
-            lastEmit = now;
-            _update(item.id, (i) => i.copyWith(received: received));
-          }
-        }
-      } finally {
-        await sink.flush();
-        await sink.close();
+      final current = byId(item.id) ?? item;
+      if (segments != null && segments > 1 && current.total != null) {
+        await _downloadSegmented(current, target, segments, cancel);
+      } else {
+        await _downloadSingle(current, target, part, cancel);
       }
-      if (total != null && received < total) {
-        throw const _DownloadError(
-          'Die Verbindung wurde vor dem Ende getrennt. Weiterladen setzt an derselben Stelle fort.',
-        );
-      }
-      if (await target.exists()) await target.delete();
-      await part.rename(target.path);
-      _update(
-        item.id,
-        (i) => i.copyWith(status: DownloadStatus.done, received: received, total: () => received, finishedAt: _now()),
-      );
     } on DioException catch (e) {
       // Nur vom Nutzer abgebrochen zählt als Pause/Löschen; der Kill-Switch bricht ebenfalls ab.
       if (CancelToken.isCancel(e) && _cancelReason != null) {
@@ -470,6 +455,214 @@ class DownloadEngine {
       // Kill-Switch und Ähnliches: verständliche Meldung statt Absturz der Schleife.
       _fail(item.id, '$e');
     }
+  }
+
+  static void _checkVideo(Response<ResponseBody> response) {
+    final contentType = response.headers.value(Headers.contentTypeHeader) ?? '';
+    if (contentType.startsWith('text/') || contentType.contains('json')) {
+      throw const _DownloadError('Der Anbieter hat statt einer Videodatei eine Fehlerseite geliefert.');
+    }
+  }
+
+  /// Fragt das freie Verbindungsbudget ab und prüft mit einem 1-Byte-Abruf, ob der
+  /// Anbieter Teilabrufe (HTTP-Range) kann. Liefert die Teilezahl oder `null` für einen Strom.
+  Future<int?> _planSegments(DownloadItem item, CancelToken cancel) async {
+    int budget;
+    try {
+      budget = (await connectionBudget?.call() ?? 1).clamp(1, maxSegments);
+    } catch (_) {
+      budget = 1;
+    }
+    if (budget < 2) return null;
+    final probe = await dio.get<ResponseBody>(
+      item.channel.streamUrl,
+      cancelToken: cancel,
+      options: Options(
+        responseType: ResponseType.stream,
+        headers: {'Range': 'bytes=0-0'},
+        receiveTimeout: const Duration(seconds: 30),
+        validateStatus: (s) => s != null && s < 400,
+      ),
+    );
+    _checkVideo(probe);
+    await probe.data?.stream.drain<void>();
+    final total = int.tryParse(
+      RegExp(r'/(\d+)$').firstMatch(probe.headers.value('content-range') ?? '')?.group(1) ?? '',
+    );
+    if (probe.statusCode != 206 || total == null || total < minSegmentedSize) return null;
+    _update(item.id, (i) => i.copyWith(total: () => total, segments: () => budget));
+    return budget;
+  }
+
+  Future<void> _downloadSegmented(DownloadItem item, File target, int count, CancelToken cancel) async {
+    final total = item.total!;
+    final size = (total / count).ceil();
+    final ranges = [
+      for (var i = 0; i < count; i++)
+        if (i * size < total) (i * size, ((i + 1) * size).clamp(0, total) - 1),
+    ];
+    final got = [
+      for (var i = 0; i < ranges.length; i++)
+        await _segmentFile(target, i).exists() ? await _segmentFile(target, i).length() : 0,
+    ];
+    var lastEmit = DateTime.fromMillisecondsSinceEpoch(0);
+    void emit({bool force = false}) {
+      final now = DateTime.now();
+      if (!force && now.difference(lastEmit) < const Duration(milliseconds: 400)) return;
+      lastEmit = now;
+      final received = got.fold<int>(0, (sum, n) => sum + n);
+      _update(item.id, (i) => i.copyWith(received: received));
+    }
+
+    emit(force: true);
+
+    Future<void> fetch(int index) async {
+      final (start, end) = ranges[index];
+      final length = end - start + 1;
+      if (got[index] >= length) return;
+      final response = await dio.get<ResponseBody>(
+        item.channel.streamUrl,
+        cancelToken: cancel,
+        options: Options(
+          responseType: ResponseType.stream,
+          headers: {'Range': 'bytes=${start + got[index]}-$end'},
+          receiveTimeout: const Duration(seconds: 60),
+          validateStatus: (s) => s != null && s < 400,
+        ),
+      );
+      _checkVideo(response);
+      if (response.statusCode != 206) {
+        throw const _DownloadError('Der Anbieter liefert keine Teilstücke mehr. Bitte erneut versuchen.');
+      }
+      final sink = _segmentFile(target, index).openWrite(mode: FileMode.append);
+      try {
+        await for (final chunk in response.data!.stream) {
+          _throwIfCancelled(cancel, response);
+          sink.add(chunk);
+          got[index] += chunk.length;
+          emit();
+        }
+      } finally {
+        await sink.flush();
+        await sink.close();
+      }
+      if (got[index] < length) {
+        throw const _DownloadError(
+          'Die Verbindung wurde vor dem Ende getrennt. Weiterladen setzt an derselben Stelle fort.',
+        );
+      }
+    }
+
+    // Alle Teile gleichzeitig. Meldet der Anbieter „zu viele Verbindungen“, kommen diese
+    // Teile danach einzeln dran, statt den Download abzubrechen.
+    final limited = <int>[];
+    await Future.wait([
+      for (var i = 0; i < ranges.length; i++)
+        () async {
+          try {
+            await fetch(i);
+          } on DioException catch (e) {
+            if (!CancelToken.isCancel(e) && _isConnectionLimit(e)) {
+              limited.add(i);
+              return;
+            }
+            if (!cancel.isCancelled) cancel.cancel();
+            rethrow;
+          } catch (_) {
+            if (!cancel.isCancelled) cancel.cancel();
+            rethrow;
+          }
+        }(),
+    ]);
+    for (final i in limited..sort()) {
+      await fetch(i);
+    }
+    emit(force: true);
+
+    // Teile zu einer Datei zusammensetzen: an Teil 0 anhängen und umbenennen.
+    final first = _segmentFile(target, 0);
+    final sink = first.openWrite(mode: FileMode.append);
+    try {
+      for (var i = 1; i < ranges.length; i++) {
+        await sink.addStream(_segmentFile(target, i).openRead());
+      }
+    } finally {
+      await sink.flush();
+      await sink.close();
+    }
+    if (await first.length() != total) {
+      throw const _DownloadError('Die Teile ergeben nicht die ganze Datei. Bitte löschen und neu laden.');
+    }
+    for (var i = 1; i < ranges.length; i++) {
+      await _segmentFile(target, i).delete();
+    }
+    if (await target.exists()) await target.delete();
+    await first.rename(target.path);
+    _update(
+      item.id,
+      (i) => i.copyWith(status: DownloadStatus.done, received: total, total: () => total, finishedAt: _now()),
+    );
+  }
+
+  /// Dio beendet einen schon laufenden Datenstrom beim Abbrechen nicht immer; das Verlassen
+  /// der Schleife schließt die Verbindung sofort.
+  static void _throwIfCancelled(CancelToken cancel, Response<ResponseBody> response) {
+    if (cancel.isCancelled) {
+      throw DioException.requestCancelled(requestOptions: response.requestOptions, reason: cancel.cancelError);
+    }
+  }
+
+  /// Typische Antworten, wenn das Konto schon alle erlaubten Verbindungen nutzt.
+  static bool _isConnectionLimit(DioException e) => const {403, 429, 458, 503, 509}.contains(e.response?.statusCode);
+
+  Future<void> _downloadSingle(DownloadItem item, File target, File part, CancelToken cancel) async {
+    var start = await part.exists() ? await part.length() : 0;
+    final response = await dio.get<ResponseBody>(
+      item.channel.streamUrl,
+      cancelToken: cancel,
+      options: Options(
+        responseType: ResponseType.stream,
+        headers: {if (start > 0) 'Range': 'bytes=$start-'},
+        receiveTimeout: const Duration(seconds: 60),
+        validateStatus: (s) => s != null && s < 400,
+      ),
+    );
+    _checkVideo(response);
+    if (start > 0 && response.statusCode != 206) start = 0; // Kein Fortsetzen möglich: von vorne.
+    final length = int.tryParse(response.headers.value(Headers.contentLengthHeader) ?? '');
+    final rangeTotal = RegExp(r'/(\d+)$').firstMatch(response.headers.value('content-range') ?? '')?.group(1);
+    final total = int.tryParse(rangeTotal ?? '') ?? (length == null ? null : start + length);
+
+    final sink = part.openWrite(mode: start > 0 ? FileMode.append : FileMode.write);
+    var received = start;
+    var lastEmit = DateTime.fromMillisecondsSinceEpoch(0);
+    _update(item.id, (i) => i.copyWith(received: received, total: () => total));
+    try {
+      await for (final chunk in response.data!.stream) {
+        _throwIfCancelled(cancel, response);
+        sink.add(chunk);
+        received += chunk.length;
+        final now = DateTime.now();
+        if (now.difference(lastEmit) > const Duration(milliseconds: 400)) {
+          lastEmit = now;
+          _update(item.id, (i) => i.copyWith(received: received));
+        }
+      }
+    } finally {
+      await sink.flush();
+      await sink.close();
+    }
+    if (total != null && received < total) {
+      throw const _DownloadError(
+        'Die Verbindung wurde vor dem Ende getrennt. Weiterladen setzt an derselben Stelle fort.',
+      );
+    }
+    if (await target.exists()) await target.delete();
+    await part.rename(target.path);
+    _update(
+      item.id,
+      (i) => i.copyWith(status: DownloadStatus.done, received: received, total: () => received, finishedAt: _now()),
+    );
   }
 
   void _fail(String id, String message) =>

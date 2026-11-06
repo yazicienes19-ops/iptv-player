@@ -8,6 +8,7 @@ import '../../player/player_controller.dart';
 import '../../providers/app_providers.dart';
 import '../../providers/imdb_providers.dart';
 import '../browse/browse_view.dart';
+import 'continue_watching.dart';
 import '../widgets/channel_views.dart';
 import '../widgets/common.dart';
 
@@ -76,6 +77,8 @@ class HomeView extends ConsumerWidget {
           const SliverToBoxAdapter(child: SizedBox(height: 32)),
         SliverList.list(
           children: [
+            // Ganz oben wie bei Streamingdiensten: dort weitermachen, wo man aufgehört hat.
+            ContinueWatchingRow(horizontalPadding: hPad, leftInset: leftInset, compact: compact),
             if (recommendations.channels.isNotEmpty) ...[
               CategoryRow(
                 title: 'Für dich empfohlen',

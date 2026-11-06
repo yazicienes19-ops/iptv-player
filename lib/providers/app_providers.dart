@@ -1076,6 +1076,12 @@ class DownloadsNotifier extends Notifier<List<DownloadItem>> {
       },
       store: ref.read(downloadIndexStoreProvider),
       beforeRequest: guard.ensureAllowed,
+      // Nur so viele Verbindungen, wie das Konto gerade frei hat (Xtream verrät das).
+      connectionBudget: () async {
+        final info = await ref.read(xtreamApiProvider)?.connectionInfo();
+        if (info == null || info.max <= 0) return 1;
+        return info.max - info.active;
+      },
       onChange: (items) {
         if (ref.mounted) state = items;
       },
@@ -1121,4 +1127,61 @@ final downloadsProvider = NotifierProvider<DownloadsNotifier, List<DownloadItem>
 final downloadForProvider = Provider.family<DownloadItem?, Channel>((ref, channel) {
   final id = downloadIdFor(ref.watch(activePlaylistProvider.select((p) => p?.id)), channel);
   return ref.watch(downloadsProvider.select((items) => items.where((i) => i.id == id).firstOrNull));
+});
+
+// ---------------------------------------------------------------------------
+// Weiterschauen
+// ---------------------------------------------------------------------------
+
+/// Ein angefangener Film oder eine Serie mit ihrer zuletzt gesehenen Folge.
+class ContinueItem {
+  const ContinueItem({required this.title, required this.point});
+
+  /// Der Film bzw. die Serie aus dem Katalog (nicht die Folge).
+  final Channel title;
+  final ResumePoint point;
+
+  bool get isSeries => title.type == ContentType.series;
+}
+
+/// Zuletzt geschaut zuerst; je Serie nur ein Eintrag; fertige Filme fallen heraus.
+/// Folgen ohne gemerkte Serie (vor diesem Update gesehen) lassen sich nicht zuordnen.
+List<ContinueItem> continueWatching(
+  PersonalLibrary library,
+  Iterable<Channel> movies,
+  Iterable<Channel> series, {
+  int limit = 20,
+}) {
+  if (library.resume.isEmpty) return const [];
+  final movieByKey = <String, Channel>{
+    for (final m in movies)
+      if (!m.isSeparator && library.resume.containsKey(personalItemKey(m))) personalItemKey(m): m,
+  };
+  final wantedSeries = {for (final p in library.resume.values) ?p.seriesId};
+  final seriesById = <String, Channel>{
+    for (final s in series)
+      if (wantedSeries.contains(s.id)) s.id: s,
+  };
+  final entries = library.resume.entries.toList()..sort((a, b) => b.value.at.compareTo(a.value.at));
+  final seen = <String>{};
+  final result = <ContinueItem>[];
+  for (final MapEntry(key: key, value: point) in entries) {
+    if (result.length >= limit) break;
+    final sid = point.seriesId;
+    if (sid != null) {
+      final show = seriesById[sid];
+      if (show != null && seen.add(sid)) result.add(ContinueItem(title: show, point: point));
+    } else {
+      final movie = movieByKey[key];
+      if (movie != null && !point.done && seen.add(key)) result.add(ContinueItem(title: movie, point: point));
+    }
+  }
+  return result;
+}
+
+final continueWatchingProvider = Provider<List<ContinueItem>>((ref) {
+  final library = ref.watch(personalLibraryProvider);
+  final movies = ref.watch(catalogProvider(ContentType.movie)).value?.channels ?? const <Channel>[];
+  final series = ref.watch(catalogProvider(ContentType.series)).value?.channels ?? const <Channel>[];
+  return continueWatching(library, movies, series);
 });

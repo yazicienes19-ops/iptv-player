@@ -208,7 +208,8 @@ class _DownloadTileState extends ConsumerState<_DownloadTile> {
     }
     return switch (item.status) {
       DownloadStatus.queued => item.received == 0 ? 'Wartet, bis der laufende Download fertig ist' : 'Wartet · $size',
-      DownloadStatus.downloading => 'Wird geladen · $size$percent',
+      DownloadStatus.downloading =>
+        'Wird geladen · $size$percent${(item.segments ?? 1) > 1 ? ' · ${item.segments} Verbindungen' : ''}',
       DownloadStatus.paused => 'Pausiert · $size$percent',
       DownloadStatus.failed => item.error ?? 'Fehlgeschlagen',
       DownloadStatus.done => 'Heruntergeladen · ${formatBytes(item.received)}',
