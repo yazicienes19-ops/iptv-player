@@ -10,6 +10,7 @@ import '../widgets/glass.dart';
 import '../widgets/vpn_badge.dart';
 import 'home_view.dart';
 import '../browse/browse_view.dart';
+import '../downloads/downloads_view.dart';
 import '../widgets/section_content.dart';
 import 'home_shell.dart';
 
@@ -22,6 +23,11 @@ class CompactLayout extends ConsumerWidget {
     final section = ref.watch(sectionProvider);
     final playlist = ref.watch(activePlaylistProvider);
     final hasPlayback = ref.watch(playerControllerProvider.select((s) => s.channel != null));
+    // Downloads stecken oben rechts statt in der Tab-Leiste (sonst zu viele Tabs fürs Handy).
+    final tabs = [
+      for (final s in AppSection.values)
+        if (s != AppSection.downloads) s,
+    ];
 
     return Scaffold(
       appBar: AppBar(
@@ -35,6 +41,13 @@ class CompactLayout extends ConsumerWidget {
           ),
           const VpnBadge(iconOnly: true),
           IconButton(
+            tooltip: 'Downloads',
+            isSelected: section == AppSection.downloads,
+            icon: const Icon(Icons.download_outlined),
+            selectedIcon: const Icon(Icons.download_rounded),
+            onPressed: () => ref.read(sectionProvider.notifier).select(AppSection.downloads),
+          ),
+          IconButton(
             tooltip: 'Einstellungen',
             icon: const Icon(Icons.settings_rounded),
             onPressed: () => Navigator.of(context).push(SettingsPage.route()),
@@ -45,6 +58,7 @@ class CompactLayout extends ConsumerWidget {
         AppSection.home => const HomeView(compact: true),
         AppSection.live => const LiveChannelsView(compact: true),
         AppSection.favorites => const FavoritesView(compact: true),
+        AppSection.downloads => const DownloadsView(compact: true),
         _ => BrowseView(key: ValueKey(section), type: section.contentType!, compact: true),
       },
       bottomNavigationBar: Column(
@@ -52,10 +66,10 @@ class CompactLayout extends ConsumerWidget {
         children: [
           if (hasPlayback) const MiniPlayer(),
           NavigationBar(
-            selectedIndex: section.index,
-            onDestinationSelected: (i) => ref.read(sectionProvider.notifier).select(AppSection.values[i]),
+            selectedIndex: tabs.contains(section) ? tabs.indexOf(section) : 0,
+            onDestinationSelected: (i) => ref.read(sectionProvider.notifier).select(tabs[i]),
             destinations: [
-              for (final s in AppSection.values)
+              for (final s in tabs)
                 NavigationDestination(
                   icon: Icon(sectionIcons[s]!.$1),
                   selectedIcon: Icon(sectionIcons[s]!.$2),

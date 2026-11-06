@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../providers/app_providers.dart';
 import '../browse/browse_view.dart';
+import '../downloads/downloads_view.dart';
 import '../widgets/section_content.dart';
 import '../live/live_workspace.dart';
 import 'home_view.dart';
@@ -42,6 +43,10 @@ class WideLayout extends ConsumerWidget {
               AppSection.favorites => const Padding(
                 padding: EdgeInsets.only(left: inset),
                 child: SafeArea(left: false, child: FavoritesView()),
+              ),
+              AppSection.downloads => const Padding(
+                padding: EdgeInsets.only(left: inset),
+                child: SafeArea(left: false, child: DownloadsView()),
               ),
               _ => BrowseView(key: ValueKey(section), type: section.contentType!, leftInset: inset),
             },

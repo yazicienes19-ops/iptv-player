@@ -41,4 +41,5 @@ const sectionIcons = <AppSection, (IconData, IconData)>{
   AppSection.movies: (Icons.movie_outlined, Icons.movie_rounded),
   AppSection.series: (Icons.video_library_outlined, Icons.video_library_rounded),
   AppSection.favorites: (Icons.star_outline_rounded, Icons.star_rounded),
+  AppSection.downloads: (Icons.download_outlined, Icons.download_rounded),
 };

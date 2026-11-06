@@ -39,6 +39,16 @@ class GlassSidebar extends ConsumerWidget {
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final compactHeight = constraints.maxHeight < 640;
+                final navItems = [
+                  for (final s in AppSection.values)
+                    _NavItem(
+                      icon: s == section ? sectionIcons[s]!.$2 : sectionIcons[s]!.$1,
+                      label: s.label,
+                      selected: s == section,
+                      compact: compactHeight,
+                      onTap: () => ref.read(sectionProvider.notifier).select(s),
+                    ),
+                ];
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -63,21 +73,19 @@ class GlassSidebar extends ConsumerWidget {
                           ),
                         ),
                       ),
-                    for (final s in AppSection.values)
-                      _NavItem(
-                        icon: s == section ? sectionIcons[s]!.$2 : sectionIcons[s]!.$1,
-                        label: s.label,
-                        selected: s == section,
-                        compact: compactHeight,
-                        onTap: () => ref.read(sectionProvider.notifier).select(s),
-                      ),
                     if (section == AppSection.live) ...[
+                      ...navItems,
                       const Padding(padding: EdgeInsets.fromLTRB(16, 10, 16, 8), child: Divider(height: 1)),
                       const Expanded(
                         child: CategoryList(key: ValueKey(ContentType.live), type: ContentType.live),
                       ),
                     ] else
-                      const Spacer(),
+                      // In sehr niedrigen Fenstern lässt sich die Navigation scrollen statt abzuschneiden.
+                      Expanded(
+                        child: SingleChildScrollView(
+                          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: navItems),
+                        ),
+                      ),
                     const Divider(height: 1, indent: 16, endIndent: 16),
                     const SizedBox(height: 6),
                     _NavItem(

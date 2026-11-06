@@ -10,6 +10,7 @@ import '../models/channel.dart';
 import '../models/content_type.dart';
 import '../providers/app_providers.dart';
 import '../providers/imdb_providers.dart';
+import '../services/download_manager.dart';
 import '../services/http_client.dart';
 import '../services/network_security.dart';
 import '../services/personal_library.dart';
@@ -42,6 +43,8 @@ class PlaybackState {
     this.retryCountdown,
     this.autoRetry = true,
     this.fit = VideoFit.contain,
+    this.recordingSince,
+    this.playingOffline = false,
   });
 
   final Channel? channel;
@@ -57,7 +60,14 @@ class PlaybackState {
   final bool autoRetry;
   final VideoFit fit;
 
+  /// Läuft gerade eine Aufnahme des Live-Senders, seit wann.
+  final DateTime? recordingSince;
+
+  /// Film oder Folge kommt aus einem fertigen Download.
+  final bool playingOffline;
+
   bool get hasError => error != null;
+  bool get isRecording => recordingSince != null;
 
   PlaybackState copyWith({
     Channel? channel,
@@ -68,6 +78,8 @@ class PlaybackState {
     int? Function()? retryCountdown,
     bool? autoRetry,
     VideoFit? fit,
+    DateTime? Function()? recordingSince,
+    bool? playingOffline,
   }) {
     return PlaybackState(
       channel: channel ?? this.channel,
@@ -78,6 +90,8 @@ class PlaybackState {
       retryCountdown: retryCountdown != null ? retryCountdown() : this.retryCountdown,
       autoRetry: autoRetry ?? this.autoRetry,
       fit: fit ?? this.fit,
+      recordingSince: recordingSince != null ? recordingSince() : this.recordingSince,
+      playingOffline: playingOffline ?? this.playingOffline,
     );
   }
 }
@@ -116,6 +130,12 @@ class PlayerController extends Notifier<PlaybackState> {
   /// Erst wenn der aktuelle Stream wirklich läuft, ist seine Position eine
   /// gültige Fortsetzungsstelle (vorher stammt sie vom alten Stream).
   bool _resumeReady = false;
+
+  String? _recordingId;
+  Timer? _recordingTimer;
+
+  /// Beim Start gemerkt, damit das Beenden auch beim Schließen der App ohne `ref` klappt.
+  DownloadEngine? _recordingEngine;
 
   @override
   PlaybackState build() {
@@ -189,6 +209,7 @@ class PlayerController extends Notifier<PlaybackState> {
     _setMpvOption('cache-on-disk', 'no');
 
     ref.onDispose(() {
+      unawaited(stopRecording());
       _flushWatch();
       _saveResume();
       _watchFlushTimer?.cancel();
@@ -206,6 +227,7 @@ class PlayerController extends Notifier<PlaybackState> {
   /// Filme und Folgen setzen an der gemerkten Stelle fort, außer mit [fromStart].
   Future<void> play(Channel channel, {List<Channel>? queue, bool fromStart = false}) async {
     if (!channel.isPlayable) return;
+    if (channel != state.channel) await stopRecording();
     _saveResume();
     _resumeReady = false;
     if (fromStart) await _personalLibrary.clearResume(channel).catchError((Object _) {});
@@ -233,6 +255,7 @@ class PlayerController extends Notifier<PlaybackState> {
   }
 
   Future<void> stop() async {
+    await stopRecording();
     _flushWatch();
     _saveResume();
     _resumeReady = false;
@@ -294,13 +317,24 @@ class PlayerController extends Notifier<PlaybackState> {
 
     _acceptStartEvents = false;
     try {
-      await ref.read(networkGuardProvider).ensureAllowed();
+      // Fertig geladene Filme und Folgen kommen von der Festplatte, auch ohne Internet und VPN.
+      final local = kIsWeb
+          ? null
+          : channel.streamUrl.startsWith('/')
+          ? channel.streamUrl
+          : channel.type == ContentType.live
+          ? null
+          : ref.read(downloadsProvider.notifier).localPathFor(channel);
+      state = state.copyWith(playingOffline: local != null);
+      if (local == null) await ref.read(networkGuardProvider).ensureAllowed();
       // Getarnter User-Agent auch für libmpv (gilt für Video- und angehängte Tonspuren).
       await _setMpvOption('user-agent', ref.read(userAgentProvider));
       if (session != _session) return;
       // Im Browser spielt der Fernseher HLS selbst ab, samt separater Tonspuren.
       // Auf webOS läuft der Stream über den Hilfsdienst, damit der getarnte User-Agent gilt.
-      final stream = kIsWeb
+      final stream = local != null
+          ? ResolvedStream(local)
+          : kIsWeb
           ? ResolvedStream(proxiedUrl(channel.streamUrl, userAgent: ref.read(userAgentProvider)))
           : await _hlsResolver.resolve(channel.streamUrl, ref.read(httpClientProvider));
       if (session != _session) return;
@@ -345,6 +379,43 @@ class PlayerController extends Notifier<PlaybackState> {
 
   Future<void> _setMpvOption(String name, String value) => mpvSetProperty(player, name, value);
 
+  /// Aufnahme nur für Live-Sender in der nativen App.
+  bool get canRecord => !kIsWeb && state.channel?.type == ContentType.live && !state.isLoading && !state.hasError;
+
+  Future<void> toggleRecording() => state.isRecording ? stopRecording() : startRecording();
+
+  /// Schreibt den laufenden Live-Stream mit (mpv `stream-record`), bis [stopRecording].
+  Future<void> startRecording() async {
+    final channel = state.channel;
+    if (!canRecord || channel == null || _recordingId != null) return;
+    final downloads = ref.read(downloadsProvider.notifier);
+    final (id, path) = await downloads.engine.beginRecording(
+      channel,
+      playlistId: ref.read(activePlaylistProvider)?.id,
+      poster: channel.logo,
+    );
+    _recordingId = id;
+    _recordingEngine = downloads.engine;
+    await _setMpvOption('stream-record', path);
+    state = state.copyWith(recordingSince: () => DateTime.now());
+    _recordingTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      unawaited(downloads.engine.updateRecordingSize(id));
+    });
+  }
+
+  Future<void> stopRecording({String? error}) async {
+    final id = _recordingId;
+    if (id == null) return;
+    _recordingId = null;
+    _recordingTimer?.cancel();
+    _recordingTimer = null;
+    await _setMpvOption('stream-record', '');
+    if (ref.mounted) state = state.copyWith(recordingSince: () => null);
+    final engine = _recordingEngine;
+    _recordingEngine = null;
+    await engine?.finishRecording(id, error: error);
+  }
+
   void _markStarted() {
     if (!_acceptStartEvents || (!state.isLoading && !state.hasError)) return;
     _watchdog?.cancel();
@@ -353,6 +424,8 @@ class PlayerController extends Notifier<PlaybackState> {
   }
 
   void _onError(String message) {
+    // Ein Abbruch beendet die Aufnahme; ein Neuversuch würde die Datei sonst überschreiben.
+    if (_recordingId != null) unawaited(stopRecording(error: 'Der Sender ist während der Aufnahme abgebrochen.'));
     _flushWatch();
     _saveResume();
     _resumeReady = false;

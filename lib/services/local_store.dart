@@ -17,6 +17,9 @@ class LocalStore {
 
   final SharedPreferences _prefs;
   final SecureStore _secure;
+
+  /// Für weitere Daten mit Zugangsdaten (z. B. das Download-Verzeichnis).
+  SecureStore get secure => _secure;
   List<PlaylistCredentials> _playlists;
   final Map<String, List<Channel>> _channels = {};
   final Map<String, PersonalLibrary> _personal = {};

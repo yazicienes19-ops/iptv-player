@@ -11,6 +11,7 @@ import '../../models/content_type.dart';
 import '../../models/tmdb.dart';
 import '../../providers/app_providers.dart';
 import '../../providers/imdb_providers.dart';
+import '../../services/download_manager.dart';
 import '../../services/personal_library.dart';
 import '../browse/browse_view.dart';
 import '../browse/poster_card.dart';
@@ -19,6 +20,7 @@ import '../widgets/channel_views.dart';
 import '../widgets/glass.dart';
 import '../widgets/media_image.dart';
 import '../widgets/tv_focus.dart';
+import '../downloads/download_button.dart';
 import 'tmdb_widgets.dart';
 
 /// Detailseite für Filme und Serien: Titelbild über das ganze Fenster, Infos links unten,
@@ -141,9 +143,8 @@ class _DetailPageState extends ConsumerState<DetailPage> {
         await ref.read(personalLibraryProvider.notifier).toggleFeedback(channel, option);
       } catch (_) {
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Deine Auswahl konnte nicht dauerhaft gespeichert werden.')),
-          );
+          ScaffoldMessenger.of(context)
+              .showSnackBar(const SnackBar(content: Text('Deine Auswahl konnte nicht dauerhaft gespeichert werden.')));
         }
       }
     }
@@ -170,7 +171,8 @@ class _DetailPageState extends ConsumerState<DetailPage> {
                 tmdb?.endYear != null && tmdb!.endYear != year ? '$year–${tmdb.endYear}' : '$year',
                 style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w500),
               ),
-            if (duration != null) Text(duration, style: const TextStyle(fontSize: 13.5, color: AppColors.textSecondary)),
+            if (duration != null)
+              Text(duration, style: const TextStyle(fontSize: 13.5, color: AppColors.textSecondary)),
             if (tmdb?.certification != null) MetaBadge(text: tmdb!.certification!, filled: false),
             for (final q in name.qualities.take(2)) QualityBadge(tag: q),
             if (isSeries && seasons.isNotEmpty)
@@ -184,10 +186,7 @@ class _DetailPageState extends ConsumerState<DetailPage> {
             style: const TextStyle(fontStyle: FontStyle.italic, color: AppColors.textSecondary, fontSize: 14),
           ),
         ],
-        if (plot != null) ...[
-          const SizedBox(height: 12),
-          _ExpandablePlot(text: plot, collapsedLines: compact ? 5 : 9),
-        ],
+        if (plot != null) ...[const SizedBox(height: 12), _ExpandablePlot(text: plot, collapsedLines: compact ? 5 : 9)],
         if (tmdb != null && tmdb.directors.isNotEmpty) ...[
           const SizedBox(height: 10),
           Text.rich(
@@ -253,6 +252,10 @@ class _DetailPageState extends ConsumerState<DetailPage> {
               ),
             ),
             const SizedBox(width: 10),
+            if (!isSeries && isDownloadable(channel)) ...[
+              DownloadButton(channel: channel, title: name.title, subtitle: year?.toString(), poster: poster),
+              const SizedBox(width: 10),
+            ],
             for (final option in [FeedbackChoice.like, FeedbackChoice.hide]) ...[
               Semantics(
                 selected: feedback == option,
@@ -284,8 +287,7 @@ class _DetailPageState extends ConsumerState<DetailPage> {
 
     // --- Bewertungen --------------------------------------------------------------------
     final ratings = <_RatingItem>[
-      if ((tmdb?.rating ?? 0) > 0)
-        _RatingItem('TMDB', '${(tmdb!.rating! * 10).round()} %', const Color(0xFF01B4E4)),
+      if ((tmdb?.rating ?? 0) > 0) _RatingItem('TMDB', '${(tmdb!.rating! * 10).round()} %', const Color(0xFF01B4E4)),
       if (matchedMovie != null && matchedMovie.rating > 0)
         _RatingItem('IMDb', matchedMovie.rating.toStringAsFixed(1), const Color(0xFFF5C518)),
       if ((details.rating ?? 0) > 0) _RatingItem('Anbieter', details.rating!.toStringAsFixed(1), AppColors.accent),
@@ -370,6 +372,7 @@ class _DetailPageState extends ConsumerState<DetailPage> {
               progress: library.resumeFor(season.episodes[i].channel),
               index: i,
               compact: compact,
+              seriesTitle: name.title,
               onPlay: () => playFullscreen(context, ref, season.episodes[i].channel, season.channels),
             ),
           ),
@@ -474,11 +477,7 @@ class _DetailPageState extends ConsumerState<DetailPage> {
     );
   }
 
-  Future<void> _showAlternatives(
-    BuildContext context,
-    List<AlternativeSource> alternatives, {
-    required bool isSeries,
-  }) {
+  Future<void> _showAlternatives(BuildContext context, List<AlternativeSource> alternatives, {required bool isSeries}) {
     return showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppColors.surface,
@@ -562,7 +561,9 @@ class _ScrollingBackdrop extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final image = RepaintBoundary(child: BackdropImage(backdrop: backdrop, poster: poster));
+    final image = RepaintBoundary(
+      child: BackdropImage(backdrop: backdrop, poster: poster),
+    );
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -593,7 +594,10 @@ class _ScrollingBackdrop extends StatelessWidget {
         DecoratedBox(
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              colors: [AppColors.background.withValues(alpha: compact ? 0.35 : 0.92), Colors.transparent],
+              colors: [
+                AppColors.background.withValues(alpha: compact ? 0.35 : 0.92),
+                Colors.transparent,
+              ],
               stops: const [0.0, 0.62],
             ),
           ),
@@ -625,8 +629,11 @@ class _TitleArt extends StatelessWidget {
   Widget build(BuildContext context) {
     final text = Text(
       title,
-      style: (compact ? Theme.of(context).textTheme.headlineSmall : Theme.of(context).textTheme.displaySmall)
-          ?.copyWith(fontWeight: FontWeight.w800, height: 1.05, letterSpacing: -0.5),
+      style: (compact ? Theme.of(context).textTheme.headlineSmall : Theme.of(context).textTheme.displaySmall)?.copyWith(
+        fontWeight: FontWeight.w800,
+        height: 1.05,
+        letterSpacing: -0.5,
+      ),
     );
     if (logo == null) return text;
     return Semantics(
@@ -655,10 +662,7 @@ class _RatingChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.16),
-        borderRadius: BorderRadius.circular(6),
-      ),
+      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.16), borderRadius: BorderRadius.circular(6)),
       child: Text(
         '★ ${rating.toStringAsFixed(1).replaceAll('.', ',')}',
         style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
@@ -972,10 +976,12 @@ class _EpisodeCard extends StatefulWidget {
     required this.index,
     required this.compact,
     required this.onPlay,
+    required this.seriesTitle,
   });
 
   final Episode episode;
   final int seasonNumber;
+  final String seriesTitle;
   final ResumePoint? progress;
   final int index;
   final bool compact;
@@ -1092,9 +1098,26 @@ class _EpisodeCardState extends State<_EpisodeCard> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'S${_two(widget.seasonNumber)}E${_two(number)}',
-                        style: const TextStyle(fontSize: 11.5, color: AppColors.textSecondary, letterSpacing: 0.4),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'S${_two(widget.seasonNumber)}E${_two(number)}',
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                color: AppColors.textSecondary,
+                                letterSpacing: 0.4,
+                              ),
+                            ),
+                          ),
+                          DownloadButton(
+                            channel: episode.channel,
+                            title: widget.seriesTitle,
+                            subtitle: 'S${_two(widget.seasonNumber)}E${_two(number)} · ${episode.channel.name}',
+                            poster: episode.channel.logo,
+                            size: 28,
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 2),
                       Text(
@@ -1209,10 +1232,7 @@ class _VideoCardState extends State<_VideoCard> {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
                 ),
-                Text(
-                  widget.video.typeLabel,
-                  style: const TextStyle(fontSize: 11.5, color: AppColors.textSecondary),
-                ),
+                Text(widget.video.typeLabel, style: const TextStyle(fontSize: 11.5, color: AppColors.textSecondary)),
               ],
             ),
           ),

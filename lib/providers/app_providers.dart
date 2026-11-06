@@ -1,6 +1,10 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/catalog.dart';
@@ -13,6 +17,8 @@ import '../models/language.dart';
 import '../models/tmdb.dart';
 import '../models/playlist_credentials.dart';
 import '../services/app_settings.dart';
+import '../services/download_manager.dart';
+import '../services/secure_store.dart';
 import '../services/http_client.dart';
 import '../services/imdb_catalog.dart';
 import '../services/local_store.dart';
@@ -408,7 +414,8 @@ enum AppSection {
   live(ContentType.live),
   movies(ContentType.movie),
   series(ContentType.series),
-  favorites(null);
+  favorites(null),
+  downloads(null);
 
   const AppSection(this.contentType);
 
@@ -417,6 +424,7 @@ enum AppSection {
   String get label => switch (this) {
     AppSection.home => 'Startseite',
     AppSection.favorites => 'Favoriten',
+    AppSection.downloads => 'Downloads',
     _ => contentType!.label,
   };
 }
@@ -991,4 +999,107 @@ List<AlternativeSource> findAlternativeSources(Channel channel, Catalog catalog)
 final alternativeSourcesProvider = Provider.family<List<AlternativeSource>, Channel>((ref, channel) {
   final catalog = ref.watch(catalogProvider(channel.type)).value;
   return catalog == null ? const [] : findAlternativeSources(channel, catalog);
+});
+
+// ---------------------------------------------------------------------------
+// Downloads und Aufnahmen
+// ---------------------------------------------------------------------------
+
+class _SecureDownloadIndexStore implements DownloadIndexStore {
+  _SecureDownloadIndexStore(this._secure);
+
+  final SecureStore _secure;
+  static const _key = 'downloads.v1';
+
+  @override
+  Future<String?> read() => _secure.read(_key);
+
+  @override
+  Future<void> write(String json) => _secure.write(_key, json);
+}
+
+final downloadIndexStoreProvider = Provider<DownloadIndexStore>(
+  (ref) => _SecureDownloadIndexStore(ref.watch(localStoreProvider).secure),
+);
+
+/// Ordner für Downloads und Aufnahmen im App-Container.
+final downloadDirectoryProvider = Provider<Future<Directory> Function()>((ref) {
+  Future<Directory>? cached;
+  return () => cached ??= () async {
+    final base = await getApplicationSupportDirectory();
+    final dir = Directory('${base.path}/Downloads');
+    await dir.create(recursive: true);
+    return dir;
+  }();
+});
+
+class DownloadsNotifier extends Notifier<List<DownloadItem>> {
+  late DownloadEngine _engine;
+  String? _dirPath;
+
+  DownloadEngine get engine => _engine;
+
+  @override
+  List<DownloadItem> build() {
+    final guard = ref.read(networkGuardProvider);
+    final directory = ref.read(downloadDirectoryProvider);
+    _engine = DownloadEngine(
+      dio: createHttpClient(
+        userAgent: ref.read(userAgentProvider),
+        guard: guard,
+        connectTimeout: const Duration(seconds: 20),
+        receiveTimeout: const Duration(seconds: 60),
+      ),
+      directory: () async {
+        final dir = await directory();
+        _dirPath = dir.path;
+        return dir;
+      },
+      store: ref.read(downloadIndexStoreProvider),
+      beforeRequest: guard.ensureAllowed,
+      onChange: (items) {
+        if (ref.mounted) state = items;
+      },
+    );
+    if (!kIsWeb) {
+      unawaited(directory().then((d) => _dirPath = d.path, onError: (Object _) => null));
+      unawaited(_engine.load());
+    }
+    return const [];
+  }
+
+  /// Fertig geladene Datei zu einem Film oder einer Folge, sonst `null`.
+  String? localPathFor(Channel channel) {
+    final dir = _dirPath;
+    if (dir == null) return null;
+    final id = downloadIdFor(ref.read(activePlaylistProvider)?.id, channel);
+    final item = state.where((i) => i.id == id && i.isDone).firstOrNull;
+    if (item == null) return null;
+    final path = '$dir/${item.fileName}';
+    return File(path).existsSync() ? path : null;
+  }
+
+  String? pathOf(DownloadItem item) => _dirPath == null ? null : '$_dirPath/${item.fileName}';
+
+  String? get directoryPath => _dirPath;
+
+  Future<void> download(Channel channel, {required String title, String? subtitle, String? poster}) => _engine.enqueue(
+    channel,
+    playlistId: ref.read(activePlaylistProvider)?.id,
+    title: title,
+    subtitle: subtitle,
+    poster: poster,
+  );
+
+  Future<void> pause(String id) => _engine.pause(id);
+  Future<void> resume(String id) => _engine.resume(id);
+  Future<void> remove(String id) => _engine.remove(id);
+}
+
+final downloadsProvider = NotifierProvider<DownloadsNotifier, List<DownloadItem>>(DownloadsNotifier.new);
+
+/// Download-Eintrag zu einem Film oder einer Folge der aktiven Playlist.
+final downloadForProvider = Provider.family<DownloadItem?, Channel>((ref, channel) {
+  final id = downloadIdFor(ref.watch(activePlaylistProvider.select((p) => p?.id)), channel);
+  return ref.watch(downloadsProvider.select((items) => items.where((i) => i.id == id).firstOrNull));
 });

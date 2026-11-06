@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -458,6 +460,7 @@ class _ControlsLayer extends ConsumerWidget {
         volume: _VolumeControl(player: player, showSlider: true, onInteraction: onInteraction),
         tracks: _TrackMenu(player: player, onInteraction: onInteraction),
         speed: channel.type != ContentType.live ? _SpeedMenu(player: player, onInteraction: onInteraction) : null,
+        record: channel.type == ContentType.live && !kIsWeb ? _RecordButton(onInteraction: onInteraction) : null,
         fitLabel: state.fit.label,
         onCycleFit: () => interact(controller.cycleFit),
         onNext: state.queue.length > 1 ? () => interact(controller.next) : null,
@@ -491,6 +494,7 @@ class PlaybackControls extends StatelessWidget {
     this.onNext,
     this.onQueue,
     this.speed,
+    this.record,
     this.showTransport = true,
   });
 
@@ -511,6 +515,9 @@ class PlaybackControls extends StatelessWidget {
   final Widget volume;
   final Widget tracks;
   final Widget? speed;
+
+  /// Aufnahme-Knopf (nur Live-Sender in der nativen App).
+  final Widget? record;
   final bool showTransport;
   final String fitLabel;
   final VoidCallback onCycleFit;
@@ -553,6 +560,7 @@ class PlaybackControls extends StatelessWidget {
         );
 
         final tools = [
+          ?record,
           volume,
           tracks,
           ?speed,
@@ -909,6 +917,58 @@ class _ChannelSwitcher extends ConsumerWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Startet/beendet die Aufnahme des laufenden Senders und zeigt die Laufzeit.
+class _RecordButton extends ConsumerWidget {
+  const _RecordButton({required this.onInteraction});
+
+  final VoidCallback onInteraction;
+
+  static String _elapsed(Duration d) {
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return h > 0 ? '$h:$m:$s' : '$m:$s';
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final since = ref.watch(playerControllerProvider.select((s) => s.recordingSince));
+    final ready = ref.watch(playerControllerProvider.select((s) => !s.isLoading && !s.hasError));
+    final controller = ref.read(playerControllerProvider.notifier);
+    void toggle() {
+      onInteraction();
+      controller.toggleRecording().catchError((Object e) {
+        if (context.mounted) {
+          ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text('Aufnahme nicht möglich: $e')));
+        }
+      });
+    }
+
+    if (since == null) {
+      return IconButton(
+        tooltip: 'Aufnehmen',
+        icon: const Icon(Icons.fiber_manual_record_outlined),
+        onPressed: ready ? toggle : null,
+      );
+    }
+    return Tooltip(
+      message: 'Aufnahme beenden',
+      child: TextButton.icon(
+        style: TextButton.styleFrom(foregroundColor: Colors.white),
+        onPressed: toggle,
+        icon: const Icon(Icons.stop_circle_rounded, color: AppColors.live),
+        label: StreamBuilder<int>(
+          stream: Stream.periodic(const Duration(seconds: 1), (i) => i),
+          builder: (context, _) => Text(
+            'REC ${_elapsed(DateTime.now().difference(since))}',
+            style: const TextStyle(fontWeight: FontWeight.w700, fontFeatures: [FontFeature.tabularFigures()]),
+          ),
         ),
       ),
     );
