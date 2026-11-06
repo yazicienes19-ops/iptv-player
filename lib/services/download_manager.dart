@@ -222,7 +222,13 @@ class DownloadEngine {
   Future<void>? _loading;
   Future<void> _writes = Future.value();
 
-  Future<void> load() => _loading ??= _load();
+  /// Schlägt das Lesen fehl (z. B. Schlüsselbund-Abfrage abgelehnt), wird beim nächsten
+  /// Zugriff erneut gelesen statt bis zum Neustart blockiert zu bleiben. Nie mit leerer
+  /// Liste weitermachen: Sie würde das gespeicherte Verzeichnis überschreiben.
+  Future<void> load() => _loading ??= _load().catchError((Object error, StackTrace stack) {
+    _loading = null;
+    Error.throwWithStackTrace(error, stack);
+  });
 
   Future<void> _load() async {
     try {

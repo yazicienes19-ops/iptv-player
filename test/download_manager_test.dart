@@ -278,4 +278,34 @@ void main() {
       expect(await (await e.fileOf(e.items.single)).readAsBytes(), body);
     });
   });
+
+  test('Download-Liste nicht lesbar: kein Überschreiben, nächster Versuch liest erneut', () async {
+    final flaky = _FlakyStore()..value = jsonEncode([]);
+    final e = DownloadEngine(dio: Dio(), directory: () async => dir, store: flaky, onChange: (_) {});
+    await expectLater(e.enqueue(movie('f1'), playlistId: 'a', title: 'Erst blockiert'), throwsA(isA<StateError>()));
+    expect(flaky.writes, 0);
+    await e.enqueue(movie('f1'), playlistId: 'a', title: 'Dann erlaubt');
+    await _until(() => e.items.single.isDone);
+  });
+}
+
+/// Erster Lesezugriff schlägt fehl (wie eine abgelehnte Schlüsselbund-Abfrage).
+class _FlakyStore extends MemoryDownloadIndexStore {
+  var _failed = false;
+  var writes = 0;
+
+  @override
+  Future<String?> read() async {
+    if (!_failed) {
+      _failed = true;
+      throw StateError('Schlüsselbund verweigert');
+    }
+    return super.read();
+  }
+
+  @override
+  Future<void> write(String json) {
+    writes++;
+    return super.write(json);
+  }
 }

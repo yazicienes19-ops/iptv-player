@@ -352,11 +352,28 @@ class _DetailPageState extends ConsumerState<DetailPage> {
               ),
             ),
           ),
-        const SizedBox(height: 6),
+        Padding(
+          padding: EdgeInsets.fromLTRB(hPad, 2, hPad, 10),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: SeasonDownloadButton(
+              seasonNumber: season!.number,
+              seriesTitle: tmdb?.title ?? cleanCatalogTitle(name.title).title,
+              episodes: [
+                for (final (i, e) in season.episodes.indexed)
+                  (
+                    channel: e.channel,
+                    subtitle:
+                        'S${season.number.toString().padLeft(2, '0')}E${(e.number > 0 ? e.number : i + 1).toString().padLeft(2, '0')} · ${e.channel.name}',
+                  ),
+              ],
+            ),
+          ),
+        ),
         SizedBox(
           height: compact ? 128 : 140,
           child: ListView.separated(
-            key: PageStorageKey('episodes-${season!.number}'),
+            key: PageStorageKey('episodes-${season.number}'),
             scrollDirection: Axis.horizontal,
             clipBehavior: Clip.none,
             padding: EdgeInsets.symmetric(horizontal: hPad),

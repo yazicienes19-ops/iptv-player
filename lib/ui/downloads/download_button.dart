@@ -33,6 +33,17 @@ class _DownloadButtonState extends ConsumerState<DownloadButton> {
   bool _hovered = false;
   bool _focused = false;
 
+  Future<void> _start() async {
+    try {
+      await ref
+          .read(downloadsProvider.notifier)
+          .download(widget.channel, title: widget.title, subtitle: widget.subtitle, poster: widget.poster);
+    } catch (_) {
+      if (!mounted) return;
+      showDownloadListError(context);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (kIsWeb || !isDownloadable(widget.channel)) return const SizedBox.shrink();
@@ -42,11 +53,7 @@ class _DownloadButtonState extends ConsumerState<DownloadButton> {
     final lit = _hovered || _focused;
 
     final (String tooltip, VoidCallback onTap, Widget icon) = switch (item?.status) {
-      null => (
-        'Herunterladen',
-        () => notifier.download(widget.channel, title: widget.title, subtitle: widget.subtitle, poster: widget.poster),
-        Icon(Icons.download_rounded, size: size * 0.5, color: Colors.white),
-      ),
+      null => ('Herunterladen', _start, Icon(Icons.download_rounded, size: size * 0.5, color: Colors.white)),
       DownloadStatus.queued => (
         'Wartet auf den laufenden Download · antippen zum Pausieren',
         () => notifier.pause(item!.id),
@@ -127,6 +134,85 @@ class _DownloadButtonState extends ConsumerState<DownloadButton> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Hinweis, wenn die Download-Liste (im Schlüsselbund) gerade nicht lesbar ist.
+void showDownloadListError(BuildContext context) {
+  if (!context.mounted) return;
+  ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+    const SnackBar(
+      content: Text(
+        'Die Download-Liste konnte nicht gelesen werden. Erlaube IpFlix den Zugriff auf den Schlüsselbund und versuche es erneut.',
+      ),
+    ),
+  );
+}
+
+/// „Staffel 2 herunterladen (10 Folgen)“: alle noch nicht geladenen Folgen einreihen.
+class SeasonDownloadButton extends ConsumerWidget {
+  const SeasonDownloadButton({
+    super.key,
+    required this.seasonNumber,
+    required this.episodes,
+    required this.seriesTitle,
+  });
+
+  final int seasonNumber;
+
+  /// Folgen samt angezeigtem Untertitel („S02E05 · Name“).
+  final List<({Channel channel, String subtitle})> episodes;
+  final String seriesTitle;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final downloadable = [
+      for (final e in episodes)
+        if (isDownloadable(e.channel)) e,
+    ];
+    if (kIsWeb || downloadable.isEmpty) return const SizedBox.shrink();
+    final playlistId = ref.watch(activePlaylistProvider.select((p) => p?.id));
+    final known = {for (final item in ref.watch(downloadsProvider)) item.id};
+    final missing = [
+      for (final e in downloadable)
+        if (!known.contains(downloadIdFor(playlistId, e.channel))) e,
+    ];
+    final all = missing.isEmpty;
+    String folgen(int n) => n == 1 ? '1 Folge' : '$n Folgen';
+    final label = all
+        ? 'Staffel $seasonNumber ist in den Downloads'
+        : missing.length == downloadable.length
+        ? 'Staffel $seasonNumber herunterladen (${folgen(downloadable.length)})'
+        : 'Restliche ${folgen(missing.length)} herunterladen';
+
+    Future<void> start() async {
+      final notifier = ref.read(downloadsProvider.notifier);
+      try {
+        for (final e in missing) {
+          await notifier.download(e.channel, title: seriesTitle, subtitle: e.subtitle, poster: e.channel.logo);
+        }
+        if (context.mounted) {
+          ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+            SnackBar(content: Text('${folgen(missing.length)} eingereiht. Fortschritt unter „Downloads“.')),
+          );
+        }
+      } catch (_) {
+        if (context.mounted) showDownloadListError(context);
+      }
+    }
+
+    return OutlinedButton.icon(
+      key: const ValueKey('season-download'),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: Colors.white,
+        side: BorderSide(color: Colors.white.withValues(alpha: 0.25)),
+        shape: const StadiumBorder(),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      ),
+      onPressed: all ? null : start,
+      icon: Icon(all ? Icons.download_done_rounded : Icons.download_rounded, size: 18),
+      label: Text(label),
     );
   }
 }

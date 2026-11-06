@@ -197,6 +197,13 @@ void main() {
         );
       }
 
+      // Staffel komplett herunterladen lässt sich anbieten.
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('season-download')),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(find.text('Staffel 1 herunterladen (3 Folgen)'), findsOneWidget);
       // Staffel wechseln.
       await tester.scrollUntilVisible(find.text('Staffel 2'), 200, scrollable: find.byType(Scrollable).first);
       await tester.tap(find.text('Staffel 2'));
