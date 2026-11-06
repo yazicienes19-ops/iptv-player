@@ -1079,7 +1079,7 @@ class DownloadsNotifier extends Notifier<List<DownloadItem>> {
       // Nur so viele Verbindungen, wie das Konto gerade frei hat (Xtream verrät das).
       connectionBudget: () async {
         final info = await ref.read(xtreamApiProvider)?.connectionInfo();
-        if (info == null || info.max <= 0) return 1;
+        if (info == null || info.max <= 0) return null;
         return info.max - info.active;
       },
       onChange: (items) {
@@ -1184,4 +1184,10 @@ final continueWatchingProvider = Provider<List<ContinueItem>>((ref) {
   final movies = ref.watch(catalogProvider(ContentType.movie)).value?.channels ?? const <Channel>[];
   final series = ref.watch(catalogProvider(ContentType.series)).value?.channels ?? const <Channel>[];
   return continueWatching(library, movies, series);
+});
+
+/// Verbindungslimit des Xtream-Kontos für die Anzeige auf der Downloads-Seite.
+final xtreamConnectionInfoProvider = FutureProvider.autoDispose<({int max, int active})?>((ref) async {
+  final api = ref.watch(xtreamApiProvider);
+  return api?.connectionInfo();
 });

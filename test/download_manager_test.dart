@@ -245,6 +245,7 @@ void main() {
       await e.enqueue(movie('p2'), playlistId: 'a', title: 'Einzeln');
       await _until(() => e.items.single.isDone);
       expect(e.items.single.segments, isNull);
+      expect(e.items.single.note, contains('nur eine freie Verbindung'));
       expect(provider.maxOpen, 1);
     });
 

@@ -76,6 +76,7 @@ class _DownloadsViewState extends ConsumerState<DownloadsView> {
                       : 'Belegt ${formatBytes(used)}. Downloads laufen nacheinander, weil die meisten Anbieter nur eine Verbindung erlauben. Währenddessen kann das Abspielen anderer Titel scheitern.',
                   style: const TextStyle(color: AppColors.textSecondary, fontSize: 13, height: 1.4),
                 ),
+                const _ConnectionLimitLine(),
                 const SizedBox(height: 14),
                 Row(
                   children: [
@@ -209,7 +210,11 @@ class _DownloadTileState extends ConsumerState<_DownloadTile> {
     return switch (item.status) {
       DownloadStatus.queued => item.received == 0 ? 'Wartet, bis der laufende Download fertig ist' : 'Wartet · $size',
       DownloadStatus.downloading =>
-        'Wird geladen · $size$percent${(item.segments ?? 1) > 1 ? ' · ${item.segments} Verbindungen' : ''}',
+        'Wird geladen · $size$percent${(item.segments ?? 1) > 1
+            ? ' · ${item.segments} Verbindungen'
+            : item.note == null
+            ? ''
+            : ' · ${item.note}'}',
       DownloadStatus.paused => 'Pausiert · $size$percent',
       DownloadStatus.failed => item.error ?? 'Fehlgeschlagen',
       DownloadStatus.done => 'Heruntergeladen · ${formatBytes(item.received)}',
@@ -342,6 +347,35 @@ class _DownloadTileState extends ConsumerState<_DownloadTile> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Was der Anbieter zu gleichzeitigen Verbindungen meldet; erklärt die Download-Geschwindigkeit.
+class _ConnectionLimitLine extends ConsumerWidget {
+  const _ConnectionLimitLine();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final info = ref.watch(xtreamConnectionInfoProvider).value;
+    if (info == null) return const SizedBox.shrink();
+    final text = info.max <= 0
+        ? 'Dein Anbieter nennt kein Verbindungslimit, darum lädt IpFlix vorsichtshalber mit einer Verbindung.'
+        : info.max == 1
+        ? 'Dein Konto erlaubt nur 1 Verbindung gleichzeitig. Schneller als der Anbieter pro Verbindung liefert, geht es deshalb nicht.'
+        : 'Dein Konto erlaubt ${info.max} Verbindungen gleichzeitig, gerade belegt: ${info.active}. Große Downloads nutzen die freien.';
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.info_outline_rounded, size: 16, color: AppColors.textSecondary),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(text, style: const TextStyle(color: AppColors.textSecondary, fontSize: 13, height: 1.4)),
+          ),
+        ],
       ),
     );
   }

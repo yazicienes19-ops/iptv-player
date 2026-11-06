@@ -38,6 +38,7 @@ class DownloadItem {
     this.finishedAt,
     this.recordedFor,
     this.segments,
+    this.note,
   });
 
   final String id;
@@ -61,6 +62,9 @@ class DownloadItem {
   /// Wird in so vielen Teilen gleichzeitig geladen (`null` = eine Verbindung).
   final int? segments;
 
+  /// Warum mit dieser Verbindungszahl geladen wird (z. B. Anbieterlimit), für die Anzeige.
+  final String? note;
+
   bool get isDone => status == DownloadStatus.done;
   bool get isActive => status == DownloadStatus.downloading;
   double? get fraction => total == null || total! <= 0 ? null : (received / total!).clamp(0.0, 1.0);
@@ -73,6 +77,7 @@ class DownloadItem {
     DateTime? finishedAt,
     Duration? recordedFor,
     int? Function()? segments,
+    String? Function()? note,
   }) => DownloadItem(
     id: id,
     kind: kind,
@@ -90,6 +95,7 @@ class DownloadItem {
     finishedAt: finishedAt ?? this.finishedAt,
     recordedFor: recordedFor ?? this.recordedFor,
     segments: segments != null ? segments() : this.segments,
+    note: note != null ? note() : this.note,
   );
 
   Map<String, dynamic> toJson() => {
@@ -109,6 +115,7 @@ class DownloadItem {
     'finishedAt': finishedAt?.toIso8601String(),
     'recordedForMs': recordedFor?.inMilliseconds,
     'seg': segments,
+    'note': note,
   };
 
   factory DownloadItem.fromJson(Map<String, dynamic> json) => DownloadItem(
@@ -128,6 +135,7 @@ class DownloadItem {
     finishedAt: DateTime.tryParse(json['finishedAt'] as String? ?? ''),
     recordedFor: json['recordedForMs'] == null ? null : Duration(milliseconds: json['recordedForMs'] as int),
     segments: json['seg'] as int?,
+    note: json['note'] as String?,
   );
 }
 
@@ -201,7 +209,8 @@ class DownloadEngine {
 
   /// Wie viele Verbindungen ein Download gleichzeitig nutzen darf (Anbieterlimit minus
   /// laufende Streams). Ohne Angabe nur eine.
-  final Future<int> Function()? connectionBudget;
+  /// `null` heißt: Der Anbieter nennt kein Limit.
+  final Future<int?> Function()? connectionBudget;
   final DateTime Function() _now;
 
   /// Höchstens so viele Teile; mehr bringt selten etwas und fällt Anbietern auf.
@@ -473,13 +482,26 @@ class DownloadEngine {
   /// Fragt das freie Verbindungsbudget ab und prüft mit einem 1-Byte-Abruf, ob der
   /// Anbieter Teilabrufe (HTTP-Range) kann. Liefert die Teilezahl oder `null` für einen Strom.
   Future<int?> _planSegments(DownloadItem item, CancelToken cancel) async {
-    int budget;
+    int? reported;
     try {
-      budget = (await connectionBudget?.call() ?? 1).clamp(1, maxSegments);
+      reported = await connectionBudget?.call();
     } catch (_) {
-      budget = 1;
+      reported = null;
     }
-    if (budget < 2) return null;
+    void explain(String note) => _update(item.id, (i) => i.copyWith(note: () => note));
+    if (reported == null) {
+      explain('1 Verbindung: Der Anbieter nennt kein Verbindungslimit.');
+      return null;
+    }
+    final budget = reported.clamp(1, maxSegments);
+    if (budget < 2) {
+      explain(
+        reported <= 0
+            ? '1 Verbindung: Alle Verbindungen deines Kontos sind gerade belegt.'
+            : '1 Verbindung: Dein Konto erlaubt gerade nur eine freie Verbindung.',
+      );
+      return null;
+    }
     final probe = await dio.get<ResponseBody>(
       item.channel.streamUrl,
       cancelToken: cancel,
@@ -495,8 +517,12 @@ class DownloadEngine {
     final total = int.tryParse(
       RegExp(r'/(\d+)$').firstMatch(probe.headers.value('content-range') ?? '')?.group(1) ?? '',
     );
-    if (probe.statusCode != 206 || total == null || total < minSegmentedSize) return null;
-    _update(item.id, (i) => i.copyWith(total: () => total, segments: () => budget));
+    if (probe.statusCode != 206 || total == null) {
+      explain('1 Verbindung: Der Anbieter erlaubt kein Laden in Teilen.');
+      return null;
+    }
+    if (total < minSegmentedSize) return null;
+    _update(item.id, (i) => i.copyWith(total: () => total, segments: () => budget, note: () => null));
     return budget;
   }
 
